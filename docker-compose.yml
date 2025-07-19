@@ -1,0 +1,26 @@
+services:
+  service-a:
+    build:
+      context: ./service-a
+      args:
+        NODE_ENV: development
+    ports:
+      - "3000:3000"
+    depends_on:
+      - service-b
+    volumes:
+      - ./service-a:/app
+    environment:
+      - NODE_ENV=development
+
+  service-b:
+    build:
+      context: ./service-b
+      args:
+        NODE_ENV: development
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./service-b:/app
+    environment:
+      - NODE_ENV=development
