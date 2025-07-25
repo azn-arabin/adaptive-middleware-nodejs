@@ -34,10 +34,4 @@ coverage/
 # uploaed files
 uploads/
 
-# Ignore all JS files except in node_modules
-*.js
-!*.config.js   # optional: allow specific files like tailwind.config.js
-
-# Optional: also ignore sourcemaps
-*.js.map
 
