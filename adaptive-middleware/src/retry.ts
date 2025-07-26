@@ -1,3 +1,14 @@
+// Callback for sending logs to presentation system
+let logCallback:
+  | ((category: string, message: string, data?: any) => void)
+  | null = null;
+
+export function setRetryLogCallback(
+  callback: (category: string, message: string, data?: any) => void,
+) {
+  logCallback = callback;
+}
+
 export async function retryRequest<T>(
   fn: () => Promise<T>,
   retries: number,
@@ -11,6 +22,17 @@ export async function retryRequest<T>(
     } catch (err) {
       attempt++;
       console.log(`[Retry] Attempt ${attempt} failed`);
+
+      // Send to presentation logs
+      if (logCallback) {
+        logCallback("RETRY", `🔄 Retry attempt ${attempt} failed`, {
+          attemptNumber: attempt,
+          maxRetries: retries,
+          remainingAttempts: retries - attempt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       if (attempt > retries) throw err;
 
       // Exponential backoff: baseDelay * 2^(attempt-1) + jitter
@@ -21,6 +43,21 @@ export async function retryRequest<T>(
       console.log(
         `[Retry] Waiting ${Math.round(totalDelay)}ms before attempt ${attempt + 1}`,
       );
+
+      // Send delay log to presentation
+      if (logCallback) {
+        logCallback(
+          "RETRY",
+          `⏱️ Exponential backoff delay: ${Math.round(totalDelay)}ms`,
+          {
+            delay: Math.round(totalDelay),
+            exponentialDelay,
+            jitter: Math.round(jitter),
+            nextAttempt: attempt + 1,
+          },
+        );
+      }
+
       await new Promise((res) => setTimeout(res, totalDelay));
     }
   }

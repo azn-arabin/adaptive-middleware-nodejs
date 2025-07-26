@@ -1,5 +1,12 @@
 import express from "express";
-import { faultTolerantFetch, startAdaptiveTuner } from "adaptive-middleware";
+import {
+  faultTolerantFetch,
+  startAdaptiveTuner,
+  setMiddlewareLogCallback,
+  setLogCallback,
+  forceAdaptation,
+  clearFailureWindow,
+} from "adaptive-middleware";
 
 startAdaptiveTuner();
 
@@ -26,23 +33,273 @@ function addPresentationLog(category: string, message: string, data?: any) {
   }
 
   // Also log to console with emoji
-  const emoji = {
-    MIDDLEWARE: "🛡️",
-    ADAPTATION: "🎯",
-    CIRCUIT: "⚡",
-    RETRY: "🔄",
-    FAILURE: "❌",
-    SUCCESS: "✅",
-    FALLBACK: "🚨",
-  }[category]
-    ? "📝"
-    : "ℹ️";
+  const emoji =
+    {
+      MIDDLEWARE: "🛡️",
+      ADAPTATION: "🎯",
+      CIRCUIT: "⚡",
+      RETRY: "🔄",
+      FAILURE: "❌",
+      SUCCESS: "✅",
+      FALLBACK: "🚨",
+    }[category] || "📝";
 
   console.log(
     `${emoji} [${category}] ${message}`,
     data ? JSON.stringify(data) : "",
   );
 }
+
+// Connect middleware logging to presentation logs
+setMiddlewareLogCallback(addPresentationLog);
+setLogCallback(addPresentationLog);
+
+// 🎯 PERFECT PRESENTATION DEMO - Shows each behavior exactly 2 times
+app.get("/demo/perfect-showcase", async (req, res) => {
+  addPresentationLog(
+    "MIDDLEWARE",
+    "🎬 Starting PERFECT SHOWCASE - controlled demo for presentation",
+  );
+
+  const results = [];
+
+  try {
+    // RESET: Start with clean slate
+    clearFailureWindow();
+    forceAdaptation("reset");
+    addPresentationLog("MIDDLEWARE", "🔄 Reset to baseline configuration");
+
+    // PHASE 1: Set Service B to moderate failure (70%) - to get some retries
+    await fetch("http://service-b:5000/control/failure-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: 0.7 }), // 70% failure - will trigger retries
+    });
+    addPresentationLog(
+      "MIDDLEWARE",
+      "📊 Phase 1: Service B set to 70% failure - triggering retries",
+    );
+
+    // Make 2 requests to show RETRY behavior
+    for (let i = 1; i <= 2; i++) {
+      addPresentationLog("MIDDLEWARE", `🔄 Retry demo request ${i}/2`);
+      const start = Date.now();
+      const response = await faultTolerantFetch("http://service-b:5000/data", {
+        fallbackData: { message: `Retry fallback ${i}` },
+      });
+      const duration = Date.now() - start;
+      results.push({ phase: "RETRY", request: i, duration: `${duration}ms` });
+
+      // Wait 3 seconds between requests
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+
+    // Force adaptation for high failure scenario
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    forceAdaptation("high_failure");
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🎯 Forced adaptation: HIGH FAILURE protection mode",
+    );
+
+    // PHASE 2: Set Service B to very high failure (95%) - to trigger circuit breaker
+    await fetch("http://service-b:5000/control/failure-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: 0.95 }), // 95% failure - will open circuit
+    });
+    addPresentationLog(
+      "MIDDLEWARE",
+      "⚡ Phase 2: Service B set to 95% failure - triggering circuit breaker",
+    );
+
+    // Make 6 rapid requests to trigger circuit breaker
+    for (let i = 1; i <= 6; i++) {
+      addPresentationLog("MIDDLEWARE", `⚡ Circuit trigger request ${i}/6`);
+      const response = await faultTolerantFetch("http://service-b:5000/data", {
+        fallbackData: { message: `Circuit fallback ${i}` },
+      });
+      results.push({ phase: "CIRCUIT_TRIGGER", request: i });
+
+      // Short pause
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+
+    // PHASE 3: Make 2 requests while circuit is OPEN (should be blocked)
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🚫 Phase 3: Testing circuit breaker protection",
+    );
+    for (let i = 1; i <= 2; i++) {
+      addPresentationLog("MIDDLEWARE", `🚫 Circuit blocked request ${i}/2`);
+      const response = await faultTolerantFetch("http://service-b:5000/data", {
+        fallbackData: { message: `Blocked fallback ${i}` },
+      });
+      results.push({ phase: "CIRCUIT_BLOCKED", request: i });
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    // PHASE 4: Wait for circuit to go HALF-OPEN, then reset Service B to healthy
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🔄 Phase 4: Waiting for circuit recovery...",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 12000)); // Wait for cooldown
+
+    // Set Service B back to healthy
+    await fetch("http://service-b:5000/control/failure-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: 0.1 }), // 10% failure - healthy
+    });
+    addPresentationLog(
+      "MIDDLEWARE",
+      "✅ Phase 5: Service B restored to healthy (10% failure)",
+    );
+
+    // Clear failure window and force recovery adaptation
+    clearFailureWindow();
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    forceAdaptation("recovery");
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🎯 Forced adaptation: RECOVERY optimization mode",
+    );
+
+    // Make 2 requests to show circuit CLOSING
+    for (let i = 1; i <= 2; i++) {
+      addPresentationLog("MIDDLEWARE", `✅ Recovery request ${i}/2`);
+      const response = await faultTolerantFetch("http://service-b:5000/data", {
+        fallbackData: { message: `Recovery fallback ${i}` },
+      });
+      results.push({ phase: "CIRCUIT_RECOVERY", request: i });
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    // Final reset
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    clearFailureWindow();
+    forceAdaptation("reset");
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🎯 Final reset to baseline configuration",
+    );
+
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🎉 PERFECT SHOWCASE COMPLETED - All behaviors demonstrated!",
+    );
+
+    res.json({
+      demoType: "PERFECT_SHOWCASE",
+      phases: {
+        RETRY: "2 requests with retry attempts",
+        CIRCUIT_TRIGGER: "6 requests to open circuit breaker",
+        CIRCUIT_BLOCKED: "2 requests blocked by circuit breaker",
+        CIRCUIT_RECOVERY: "2 requests showing circuit closure",
+      },
+      adaptations: {
+        BASELINE_RESET: "Reset to default configuration",
+        HIGH_FAILURE_PROTECTION: "Aggressive protection during failures",
+        RECOVERY_OPTIMIZATION: "Optimistic settings during recovery",
+      },
+      totalRequests: results.length,
+      results,
+      message:
+        "🎯 Perfect demo completed! Check logs: /logs/presentation?category=retry, /logs/presentation?category=circuit, /logs/presentation?category=adaptation",
+    });
+  } catch (error: any) {
+    addPresentationLog("FAILURE", "Perfect showcase failed", {
+      error: error.message,
+    });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 🔥 NEW AGGRESSIVE FAILURE DEMO - This will trigger circuit breaker!
+app.get("/demo/failure-showcase", async (req, res) => {
+  addPresentationLog(
+    "MIDDLEWARE",
+    "🔥 Starting FAILURE SHOWCASE - forcing circuit breaker activation",
+  );
+
+  // First, set Service B to high failure rate
+  try {
+    await fetch("http://service-b:5000/control/failure-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: 0.9 }), // 90% failure rate!
+    });
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🎯 Service B failure rate set to 90% - circuit breaker will activate soon",
+    );
+  } catch (e) {
+    addPresentationLog(
+      "MIDDLEWARE",
+      "⚠️ Could not configure Service B failure rate",
+    );
+  }
+
+  const results = [];
+
+  // Make rapid requests to trigger circuit breaker
+  for (let i = 1; i <= 20; i++) {
+    addPresentationLog("MIDDLEWARE", `🔥 Failure demo request ${i}/20`);
+
+    const start = Date.now();
+    const response = await faultTolerantFetch("http://service-b:5000/data", {
+      fallbackData: { message: `Emergency fallback ${i}` },
+    });
+    const duration = Date.now() - start;
+
+    const success =
+      !response.error &&
+      !response.message?.includes("fallback") &&
+      !response.message?.includes("Emergency");
+    results.push({
+      request: i,
+      success,
+      duration: `${duration}ms`,
+      response: success ? "Service B success" : "Fallback/Circuit protection",
+    });
+
+    // Short pause to let logs accumulate
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  // Reset Service B to normal after demo
+  try {
+    await fetch("http://service-b:5000/control/failure-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rate: 0.3 }),
+    });
+    addPresentationLog(
+      "MIDDLEWARE",
+      "🔄 Service B failure rate reset to 30% - recovery phase starting",
+    );
+  } catch (e) {
+    addPresentationLog(
+      "MIDDLEWARE",
+      "⚠️ Could not reset Service B failure rate",
+    );
+  }
+
+  res.json({
+    demoType: "FAILURE_SHOWCASE",
+    totalRequests: 20,
+    results,
+    summary: {
+      successful: results.filter((r) => r.success).length,
+      protected: results.filter((r) => !r.success).length,
+      message:
+        "🎯 Check /logs/presentation?category=circuit for circuit breaker logs!",
+    },
+  });
+});
 
 // Main endpoint - uses adaptive retry count (no hardcoded retries)
 app.get("/call-b", async (req, res) => {
