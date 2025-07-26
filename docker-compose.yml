@@ -1,28 +1,41 @@
 services:
+  adaptive-middleware:
+    build:
+      context: ./adaptive-middleware
+    volumes:
+      - ./adaptive-middleware/src:/app/src
+      - ./adaptive-middleware/dist:/app/dist
+    command: sh -c "npm install && npm run build && npm run dev"
+    working_dir: /app
+
   service-a:
     build:
       context: ./service-a
-      args:
-        NODE_ENV: development
     ports:
       - "3000:3000"
     depends_on:
-      - service-b
+      adaptive-middleware:
+        condition: service_started
+      service-b:
+        condition: service_started
     volumes:
-      - ./service-a:/app
-      - /app/node_modules
+      - ./service-a/src:/app/src
+      - ./service-a/package.json:/app/package.json
+      - ./adaptive-middleware:/app/adaptive-middleware
     environment:
       - NODE_ENV=development
+    tty: true
+    stdin_open: true
 
   service-b:
     build:
       context: ./service-b
-      args:
-        NODE_ENV: development
     ports:
       - "5000:5000"
     volumes:
-      - ./service-b:/app
-      - /app/node_modules
+      - ./service-b/src:/app/src
+      - ./service-b/package.json:/app/package.json
     environment:
       - NODE_ENV=development
+    tty: true
+    stdin_open: true
