@@ -1,180 +1,285 @@
 import express from "express";
+import { MarkovFailureModel, ServiceState } from "./markovFailureModel.js";
 
 const app = express();
 app.use(express.json());
 
-// Service state for controlling failure patterns
-let failureRate = 0.3; // Start with 30% failure rate
-let responseDelay = 0; // No delay by default
-let consecutiveFailures = 0;
+// Initialize Markov Chain Failure Model
+const failureModel = new MarkovFailureModel();
+
+// Service metrics for tracking
 let totalRequests = 0;
-let successfulRequests = 0;
+let requestHistory: Array<{
+  id: number;
+  timestamp: number;
+  success: boolean;
+  responseTime: number;
+  state: ServiceState;
+  errorDetails?: any;
+}> = [];
 
-// Failure patterns
-const FAILURE_PATTERNS = {
-  RANDOM: "random",
-  BURST: "burst", // High failure rate for a period, then recovery
-  DEGRADING: "degrading", // Gradually increasing failure rate
-  HEALTHY: "healthy", // Very low failure rate
-};
+// Keep last 1000 requests for statistics
+const MAX_HISTORY = 1000;
 
-let currentPattern = FAILURE_PATTERNS.RANDOM;
-let patternStartTime = Date.now();
-
-function getFailureRateForPattern() {
-  const timeSinceStart = Date.now() - patternStartTime;
-  const minutes = timeSinceStart / (1000 * 60);
-
-  switch (currentPattern) {
-    case FAILURE_PATTERNS.BURST:
-      // High failure for 2 minutes, then low failure for 2 minutes, repeat
-      return minutes % 4 < 2 ? 0.8 : 0.1;
-
-    case FAILURE_PATTERNS.DEGRADING:
-      // Gradually increase from 10% to 70% over 5 minutes, then reset
-      const cycle = minutes % 5;
-      return Math.min(0.1 + cycle * 0.12, 0.7);
-
-    case FAILURE_PATTERNS.HEALTHY:
-      return 0.05; // 5% failure rate
-
-    case FAILURE_PATTERNS.RANDOM:
-    default:
-      return failureRate;
-  }
-}
+console.log("🎭 [Service B] Started with Markov Chain Failure Model");
+console.log(
+  "📊 Available states: HEALTHY → DEGRADED → FAILING → CRITICAL ⟷ RECOVERING",
+);
 
 app.get("/data", (req, res) => {
   totalRequests++;
-  const currentFailureRate = getFailureRateForPattern();
-  const shouldFail = Math.random() < currentFailureRate;
+  const requestStart = Date.now();
 
-  // Add response delay if configured
+  // Get failure decision from Markov model
+  const result = failureModel.processRequest();
+  const currentState = failureModel.getCurrentState();
+
+  // Simulate load-based effects (optional: could be based on concurrent requests)
+  const currentLoad = Math.min(3.0, 1.0 + (totalRequests % 100) / 50); // Simulate varying load
+  failureModel.setLoadFactor(currentLoad);
+
+  // Add response delay
   setTimeout(() => {
-    if (shouldFail) {
-      consecutiveFailures++;
-      const errorTypes = [
-        { status: 500, message: "Internal Server Error" },
-        { status: 503, message: "Service Unavailable" },
-        { status: 408, message: "Request Timeout" },
-        { status: 502, message: "Bad Gateway" },
-      ];
-      const error = errorTypes[Math.floor(Math.random() * errorTypes.length)];
+    const responseTime = Date.now() - requestStart;
+
+    if (result.shouldFail && result.errorDetails) {
+      // Record failed request
+      const requestRecord = {
+        id: totalRequests,
+        timestamp: requestStart,
+        success: false,
+        responseTime,
+        state: currentState,
+        errorDetails: result.errorDetails,
+      };
+
+      requestHistory.unshift(requestRecord);
+      if (requestHistory.length > MAX_HISTORY) requestHistory.pop();
 
       console.log(
-        `❌ [Service B] Request ${totalRequests} FAILED (${error.status}) - Consecutive failures: ${consecutiveFailures}, Current failure rate: ${(currentFailureRate * 100).toFixed(1)}%`,
+        `❌ [Service B] Request ${totalRequests} FAILED (${result.errorDetails.status}) - State: ${currentState}, Load: ${currentLoad.toFixed(2)}`,
       );
-      res.status(error.status).json({
-        error: error.message,
+
+      res.status(result.errorDetails.status).json({
+        error: result.errorDetails.message,
         timestamp: new Date().toISOString(),
         requestId: totalRequests,
-        consecutiveFailures,
+        serviceState: currentState,
+        loadFactor: result.errorDetails.loadFactor,
+        markovModel: true,
       });
     } else {
-      consecutiveFailures = 0; // Reset on success
-      successfulRequests++;
-      const successRate = ((successfulRequests / totalRequests) * 100).toFixed(
-        1,
-      );
+      // Record successful request
+      const requestRecord = {
+        id: totalRequests,
+        timestamp: requestStart,
+        success: true,
+        responseTime,
+        state: currentState,
+      };
+
+      requestHistory.unshift(requestRecord);
+      if (requestHistory.length > MAX_HISTORY) requestHistory.pop();
+
+      const successRate = (
+        (requestHistory.filter((r) => r.success).length /
+          requestHistory.length) *
+        100
+      ).toFixed(1);
 
       console.log(
-        `✅ [Service B] Request ${totalRequests} SUCCESS - Overall success rate: ${successRate}%, Current failure rate: ${(currentFailureRate * 100).toFixed(1)}%`,
+        `✅ [Service B] Request ${totalRequests} SUCCESS - State: ${currentState}, Success Rate: ${successRate}%`,
       );
+
       res.json({
-        data: "Hello from Service B",
+        data: "Hello from Service B with Markov Model",
         timestamp: new Date().toISOString(),
         requestId: totalRequests,
+        serviceState: currentState,
         successRate: `${successRate}%`,
-        message: "Service operating normally",
+        loadFactor: currentLoad.toFixed(2),
+        message: `Service operating in ${currentState} state`,
+        markovModel: true,
       });
     }
-  }, responseDelay);
+  }, result.responseDelay);
 });
 
-// Control endpoints for testing
-app.post("/control/failure-rate", (req, res) => {
-  const { rate } = req.body;
-  if (rate >= 0 && rate <= 1) {
-    failureRate = rate;
-    currentPattern = FAILURE_PATTERNS.RANDOM;
-    console.log(
-      `🔧 [Service B] Failure rate set to ${(rate * 100).toFixed(1)}%`,
-    );
-    res.json({ message: `Failure rate set to ${(rate * 100).toFixed(1)}%` });
-  } else {
-    res.status(400).json({ error: "Failure rate must be between 0 and 1" });
-  }
-});
+// Enhanced statistics endpoint for academic presentation
+app.get("/statistics", (req, res) => {
+  const markovStats = failureModel.getStatistics();
+  const recentRequests = requestHistory.slice(0, 100); // Last 100 requests
 
-app.post("/control/pattern", (req, res) => {
-  const { pattern } = req.body;
-  if (Object.values(FAILURE_PATTERNS).includes(pattern)) {
-    currentPattern = pattern;
-    patternStartTime = Date.now();
-    console.log(`🔧 [Service B] Failure pattern set to: ${pattern}`);
-    res.json({ message: `Failure pattern set to: ${pattern}` });
-  } else {
-    res
-      .status(400)
-      .json({
-        error: `Invalid pattern. Use: ${Object.values(FAILURE_PATTERNS).join(", ")}`,
-      });
-  }
-});
+  // Calculate additional metrics
+  const successRate =
+    recentRequests.length > 0
+      ? (recentRequests.filter((r) => r.success).length /
+          recentRequests.length) *
+        100
+      : 0;
 
-app.post("/control/delay", (req, res) => {
-  const { delay } = req.body;
-  if (delay >= 0 && delay <= 5000) {
-    responseDelay = delay;
-    console.log(`🔧 [Service B] Response delay set to ${delay}ms`);
-    res.json({ message: `Response delay set to ${delay}ms` });
-  } else {
-    res.status(400).json({ error: "Delay must be between 0 and 5000ms" });
-  }
-});
+  const avgResponseTime =
+    recentRequests.length > 0
+      ? recentRequests.reduce((sum, r) => sum + r.responseTime, 0) /
+        recentRequests.length
+      : 0;
 
-// Status endpoint
-app.get("/status", (req, res) => {
-  const uptime = process.uptime();
-  const currentFailureRate = getFailureRateForPattern();
+  // State distribution for recent requests
+  const stateDistribution = new Map<ServiceState, number>();
+  recentRequests.forEach((r) => {
+    stateDistribution.set(r.state, (stateDistribution.get(r.state) || 0) + 1);
+  });
+
+  // Transition matrix statistics
+  const transitionStats: any = {};
+  markovStats.transitionCount.forEach((count, transition) => {
+    transitionStats[transition] = count;
+  });
+
   res.json({
-    status: "running",
-    uptime: `${Math.floor(uptime / 60)}m ${Math.floor(uptime % 60)}s`,
-    stats: {
-      totalRequests,
-      successfulRequests,
-      failedRequests: totalRequests - successfulRequests,
-      successRate:
-        totalRequests > 0
-          ? `${((successfulRequests / totalRequests) * 100).toFixed(1)}%`
-          : "0%",
-      consecutiveFailures,
+    // Service-level metrics
+    serviceMetrics: {
+      totalRequests: totalRequests,
+      successRate: successRate.toFixed(2) + "%",
+      failureRate: (100 - successRate).toFixed(2) + "%",
+      averageResponseTime: avgResponseTime.toFixed(2) + "ms",
+      requestsInLast100: recentRequests.length,
     },
-    config: {
-      currentPattern,
-      staticFailureRate: `${(failureRate * 100).toFixed(1)}%`,
-      currentFailureRate: `${(currentFailureRate * 100).toFixed(1)}%`,
-      responseDelay: `${responseDelay}ms`,
+
+    // Markov Chain specific metrics
+    markovChainMetrics: {
+      currentState: markovStats.currentState,
+      mtbf: markovStats.mtbf.toFixed(2) + "ms", // Mean Time Between Failures
+      mttr: markovStats.mttr.toFixed(2) + "ms", // Mean Time To Recovery
+      stateTransitions: transitionStats,
+      stateHistory: markovStats.stateHistory.slice(-10), // Last 10 state changes
     },
-    availablePatterns: Object.values(FAILURE_PATTERNS),
+
+    // Academic presentation data
+    presentationData: {
+      stateDistributionRecent: Object.fromEntries(
+        Array.from(stateDistribution.entries()).map(([state, count]) => [
+          state,
+          {
+            count,
+            percentage:
+              ((count / recentRequests.length) * 100).toFixed(1) + "%",
+          },
+        ]),
+      ),
+      failurePatternAnalysis: {
+        healthyRequests: recentRequests.filter(
+          (r) => r.state === ServiceState.HEALTHY,
+        ).length,
+        degradedRequests: recentRequests.filter(
+          (r) => r.state === ServiceState.DEGRADED,
+        ).length,
+        failingRequests: recentRequests.filter(
+          (r) => r.state === ServiceState.FAILING,
+        ).length,
+        criticalRequests: recentRequests.filter(
+          (r) => r.state === ServiceState.CRITICAL,
+        ).length,
+        recoveringRequests: recentRequests.filter(
+          (r) => r.state === ServiceState.RECOVERING,
+        ).length,
+      },
+    },
+
+    timestamp: new Date().toISOString(),
+    modelType: "Markov Chain",
   });
 });
 
-app.listen(5000, () => {
-  console.log("🚀 Service B running on port 5000");
-  console.log("📊 Available endpoints:");
-  console.log("  GET  /data - Main data endpoint");
-  console.log("  GET  /status - Service status and stats");
+// Control endpoints for demonstration
+app.post("/control/force-state", (req, res) => {
+  const { state } = req.body;
+
+  if (!Object.values(ServiceState).includes(state)) {
+    return res.status(400).json({
+      error: "Invalid state",
+      validStates: Object.values(ServiceState),
+    });
+  }
+
+  failureModel.forceStateTransition(state as ServiceState);
+  console.log(`🎯 [Service B] Forced transition to state: ${state}`);
+
+  res.json({
+    message: `State forced to ${state}`,
+    currentState: failureModel.getCurrentState(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.post("/control/load-factor", (req, res) => {
+  const { load } = req.body;
+
+  if (typeof load !== "number" || load < 0.1 || load > 3.0) {
+    return res.status(400).json({
+      error: "Load factor must be between 0.1 and 3.0",
+    });
+  }
+
+  failureModel.setLoadFactor(load);
+  console.log(`📊 [Service B] Load factor set to: ${load}`);
+
+  res.json({
+    message: `Load factor set to ${load}`,
+    currentState: failureModel.getCurrentState(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Get current Markov Chain configuration
+app.get("/markov/configuration", (req, res) => {
+  const transitionMatrix = failureModel.getTransitionMatrix();
+  const config: any = {};
+
+  // Convert Map to JSON-serializable object
+  transitionMatrix.forEach((transitions, state) => {
+    config[state] = transitions;
+  });
+
+  res.json({
+    currentState: failureModel.getCurrentState(),
+    transitionMatrix: config,
+    stateDescription: {
+      [ServiceState.HEALTHY]: "5% failure rate, 50ms delay",
+      [ServiceState.DEGRADED]: "25% failure rate, 200ms delay",
+      [ServiceState.FAILING]: "60% failure rate, 800ms delay",
+      [ServiceState.CRITICAL]: "90% failure rate, 2000ms delay",
+      [ServiceState.RECOVERING]: "35% failure rate, 400ms delay",
+    },
+    academicNote: "Markov Chain model with load-based transition adjustments",
+  });
+});
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  const currentState = failureModel.getCurrentState();
+  const isHealthy =
+    currentState === ServiceState.HEALTHY ||
+    currentState === ServiceState.RECOVERING;
+
+  res.status(isHealthy ? 200 : 503).json({
+    status: isHealthy ? "healthy" : "unhealthy",
+    state: currentState,
+    timestamp: new Date().toISOString(),
+    model: "Markov Chain",
+  });
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
   console.log(
-    "  POST /control/failure-rate - Set failure rate (body: {rate: 0.0-1.0})",
+    `🚀 [Service B] Running on port ${PORT} with Markov Chain Failure Model`,
   );
+  console.log(`📈 Academic endpoints:`);
   console.log(
-    "  POST /control/pattern - Set failure pattern (body: {pattern: 'random|burst|degrading|healthy'})",
+    `   GET  /statistics - Comprehensive statistics for presentation`,
   );
-  console.log(
-    "  POST /control/delay - Set response delay (body: {delay: 0-5000})",
-  );
-  console.log(
-    `🎯 Starting with ${(failureRate * 100).toFixed(1)}% failure rate`,
-  );
+  console.log(`   GET  /markov/configuration - Model configuration details`);
+  console.log(`   POST /control/force-state - Force state transition`);
+  console.log(`   POST /control/load-factor - Adjust load factor`);
 });

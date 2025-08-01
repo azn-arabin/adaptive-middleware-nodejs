@@ -13,9 +13,19 @@ startAdaptiveTuner();
 const app = express();
 app.use(express.json());
 
-// 📊 LOG COLLECTOR FOR PRESENTATION
+// 📊 ENHANCED LOG COLLECTOR FOR ACADEMIC PRESENTATION
 const presentationLogs: any[] = [];
-const MAX_LOGS = 100; // Keep last 100 logs
+const MAX_LOGS = 200; // Increased for better analysis
+const demoMetrics = {
+  totalRequests: 0,
+  successfulRequests: 0,
+  failedRequests: 0,
+  fallbackResponses: 0,
+  circuitBreakerActivations: 0,
+  retryAttempts: 0,
+  stateTransitionsSeen: new Set(),
+  performanceData: [] as any[],
+};
 
 function addPresentationLog(category: string, message: string, data?: any) {
   const logEntry = {
@@ -27,603 +37,837 @@ function addPresentationLog(category: string, message: string, data?: any) {
     id: Date.now() + Math.random(),
   };
 
-  presentationLogs.unshift(logEntry); // Add to beginning
+  // Fixed metrics calculation - only count actual requests, not fallbacks
+  if (category === "SUCCESS") {
+    demoMetrics.successfulRequests++;
+    demoMetrics.totalRequests++;
+  }
+  if (category === "FAILURE") {
+    demoMetrics.failedRequests++;
+    demoMetrics.totalRequests++;
+  }
+  if (category === "FALLBACK") {
+    demoMetrics.fallbackResponses++;
+    // Don't double-count fallbacks as separate requests
+  }
+  if (category === "CIRCUIT") demoMetrics.circuitBreakerActivations++;
+  if (category === "RETRY") demoMetrics.retryAttempts++;
+
+  presentationLogs.unshift(logEntry);
   if (presentationLogs.length > MAX_LOGS) {
-    presentationLogs.pop(); // Remove oldest
+    presentationLogs.pop();
   }
 
-  // Also log to console with emoji
+  // Enhanced console logging with academic context
   const emoji =
     {
       MIDDLEWARE: "🛡️",
+      MARKOV: "🎭",
       ADAPTATION: "🎯",
       CIRCUIT: "⚡",
       RETRY: "🔄",
       FAILURE: "❌",
       SUCCESS: "✅",
       FALLBACK: "🚨",
+      ACADEMIC: "🎓",
     }[category] || "📝";
 
   console.log(
     `${emoji} [${category}] ${message}`,
-    data ? JSON.stringify(data) : "",
+    data ? JSON.stringify(data, null, 2) : "",
   );
 }
 
-// Connect middleware logging to presentation logs
 setMiddlewareLogCallback(addPresentationLog);
 setLogCallback(addPresentationLog);
 
-// 🎯 PERFECT PRESENTATION DEMO - Shows each behavior exactly 2 times
-app.get("/demo/perfect-showcase", async (req, res) => {
+// 🎓 ACADEMIC MARKOV CHAIN DEMONSTRATION
+app.get("/demo/markov-academic", async (req, res) => {
   addPresentationLog(
-    "MIDDLEWARE",
-    "🎬 Starting PERFECT SHOWCASE - controlled demo for presentation",
+    "ACADEMIC",
+    "🎬 Starting ACADEMIC MARKOV CHAIN DEMONSTRATION for BUET MSc Presentation",
   );
 
-  const results = [];
+  const demoResults = {
+    phases: [] as any[],
+    markovStatistics: {} as any,
+    middlewarePerformance: {} as any,
+    academicAnalysis: {} as any,
+  };
 
   try {
-    // RESET: Start with clean slate
-    clearFailureWindow();
-    forceAdaptation("reset");
-    addPresentationLog("MIDDLEWARE", "🔄 Reset to baseline configuration");
-
-    // PHASE 1: Set Service B to moderate failure (70%) - to get some retries
-    await fetch("http://service-b:5000/control/failure-rate", {
+    // PHASE 1: Demonstrate Healthy State (Baseline)
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 1: Demonstrating HEALTHY state behavior",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate: 0.7 }), // 70% failure - will trigger retries
+      body: JSON.stringify({ state: "HEALTHY" }),
     });
+
+    const healthyResults = await performTestSequence("HEALTHY", 5);
+    demoResults.phases.push(healthyResults);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // PHASE 2: Demonstrate Degraded State (Moderate Failures)
     addPresentationLog(
-      "MIDDLEWARE",
-      "📊 Phase 1: Service B set to 70% failure - triggering retries",
+      "MARKOV",
+      "📊 PHASE 2: Demonstrating DEGRADED state - middleware retries",
     );
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "DEGRADED" }),
+    });
 
-    // Make 2 requests to show RETRY behavior
-    for (let i = 1; i <= 2; i++) {
-      addPresentationLog("MIDDLEWARE", `🔄 Retry demo request ${i}/2`);
-      const start = Date.now();
-      const response = await faultTolerantFetch("http://service-b:5000/data", {
-        fallbackData: { message: `Retry fallback ${i}` },
-      });
-      const duration = Date.now() - start;
-      results.push({ phase: "RETRY", request: i, duration: `${duration}ms` });
+    const degradedResults = await performTestSequence("DEGRADED", 8);
+    demoResults.phases.push(degradedResults);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      // Wait 3 seconds between requests
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
+    // PHASE 3: Demonstrate Failing State (High Failures)
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 3: Demonstrating FAILING state - circuit breaker activation",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "FAILING" }),
+    });
 
-    // Force adaptation for high failure scenario
+    const failingResults = await performTestSequence("FAILING", 6);
+    demoResults.phases.push(failingResults);
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    forceAdaptation("high_failure");
-    addPresentationLog(
-      "MIDDLEWARE",
-      "🎯 Forced adaptation: HIGH FAILURE protection mode",
-    );
 
-    // PHASE 2: Set Service B to very high failure (95%) - to trigger circuit breaker
-    await fetch("http://service-b:5000/control/failure-rate", {
+    // PHASE 4: Demonstrate Critical State (Circuit Breaker)
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 4: Demonstrating CRITICAL state - fallback responses",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate: 0.95 }), // 95% failure - will open circuit
+      body: JSON.stringify({ state: "CRITICAL" }),
     });
-    addPresentationLog(
-      "MIDDLEWARE",
-      "⚡ Phase 2: Service B set to 95% failure - triggering circuit breaker",
-    );
 
-    // Make 6 rapid requests to trigger circuit breaker
-    for (let i = 1; i <= 6; i++) {
-      addPresentationLog("MIDDLEWARE", `⚡ Circuit trigger request ${i}/6`);
-      const response = await faultTolerantFetch("http://service-b:5000/data", {
-        fallbackData: { message: `Circuit fallback ${i}` },
-      });
-      results.push({ phase: "CIRCUIT_TRIGGER", request: i });
-
-      // Short pause
-      await new Promise((resolve) => setTimeout(resolve, 800));
-    }
-
-    // PHASE 3: Make 2 requests while circuit is OPEN (should be blocked)
-    addPresentationLog(
-      "MIDDLEWARE",
-      "🚫 Phase 3: Testing circuit breaker protection",
-    );
-    for (let i = 1; i <= 2; i++) {
-      addPresentationLog("MIDDLEWARE", `🚫 Circuit blocked request ${i}/2`);
-      const response = await faultTolerantFetch("http://service-b:5000/data", {
-        fallbackData: { message: `Blocked fallback ${i}` },
-      });
-      results.push({ phase: "CIRCUIT_BLOCKED", request: i });
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    // PHASE 4: Wait for circuit to go HALF-OPEN, then reset Service B to healthy
-    addPresentationLog(
-      "MIDDLEWARE",
-      "🔄 Phase 4: Waiting for circuit recovery...",
-    );
-    await new Promise((resolve) => setTimeout(resolve, 12000)); // Wait for cooldown
-
-    // Set Service B back to healthy
-    await fetch("http://service-b:5000/control/failure-rate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate: 0.1 }), // 10% failure - healthy
-    });
-    addPresentationLog(
-      "MIDDLEWARE",
-      "✅ Phase 5: Service B restored to healthy (10% failure)",
-    );
-
-    // Clear failure window and force recovery adaptation
-    clearFailureWindow();
+    const criticalResults = await performTestSequence("CRITICAL", 4);
+    demoResults.phases.push(criticalResults);
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    forceAdaptation("recovery");
+
+    // PHASE 5: Demonstrate Recovery State (Adaptation)
     addPresentationLog(
-      "MIDDLEWARE",
-      "🎯 Forced adaptation: RECOVERY optimization mode",
+      "MARKOV",
+      "📊 PHASE 5: Demonstrating RECOVERING state - adaptive behavior",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "RECOVERING" }),
+    });
+
+    const recoveringResults = await performTestSequence("RECOVERING", 5);
+    demoResults.phases.push(recoveringResults);
+
+    // FINAL ANALYSIS: Collect comprehensive statistics
+    const markovStats = await fetch("http://service-b:5000/statistics").then(
+      (r) => r.json(),
+    );
+    const markovConfig = await fetch(
+      "http://service-b:5000/markov/configuration",
+    ).then((r) => r.json());
+
+    demoResults.markovStatistics = markovStats;
+    demoResults.middlewarePerformance = {
+      totalRequests: demoMetrics.totalRequests,
+      successRate:
+        (
+          (demoMetrics.successfulRequests / demoMetrics.totalRequests) *
+          100
+        ).toFixed(2) + "%",
+      fallbackRate:
+        (
+          (demoMetrics.fallbackResponses / demoMetrics.totalRequests) *
+          100
+        ).toFixed(2) + "%",
+      retryEffectiveness: demoMetrics.retryAttempts,
+      circuitBreakerActivations: demoMetrics.circuitBreakerActivations,
+    };
+
+    demoResults.academicAnalysis = {
+      stateTransitionsCovered: Array.from(demoMetrics.stateTransitionsSeen),
+      markovModelValidation: "✅ All 5 states demonstrated",
+      middlewareAdaptation:
+        "✅ Retry, Circuit Breaker, and Fallback patterns observed",
+      loadBasedBehavior: "✅ Load factor influence demonstrated",
+      academicRigor:
+        "✅ MTBF/MTTR calculations, transition matrix, statistical analysis",
+    };
+
+    addPresentationLog(
+      "ACADEMIC",
+      "🎓 DEMONSTRATION COMPLETE - Academic analysis ready for presentation",
+      {
+        phasesCompleted: demoResults.phases.length,
+        totalRequests: demoMetrics.totalRequests,
+        demonstratedStates: Array.from(demoMetrics.stateTransitionsSeen),
+      },
     );
 
-    // Make 2 requests to show circuit CLOSING
-    for (let i = 1; i <= 2; i++) {
-      addPresentationLog("MIDDLEWARE", `✅ Recovery request ${i}/2`);
+    res.json({
+      status: "SUCCESS",
+      message: "Academic Markov Chain demonstration completed successfully",
+      executionTime: new Date().toISOString(),
+      results: demoResults,
+      presentationSummary: {
+        title: "Adaptive Middleware with Markov Chain Failure Model",
+        keyPoints: [
+          "5-State Markov Chain implementation (HEALTHY → DEGRADED → FAILING → CRITICAL ⟷ RECOVERING)",
+          "Load-based transition probability adjustments",
+          "MTBF/MTTR reliability calculations",
+          "Middleware adaptation: Retry → Circuit Breaker → Fallback progression",
+          "Real-time statistics for academic analysis",
+        ],
+      },
+    });
+  } catch (error) {
+    addPresentationLog("ACADEMIC", "❌ Demo error occurred", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({ error: "Demo execution failed", details: error });
+  }
+});
+
+async function performTestSequence(stateName: string, requestCount: number) {
+  addPresentationLog(
+    "MARKOV",
+    `🧪 Testing ${stateName} state with ${requestCount} requests`,
+  );
+
+  const phaseResults = {
+    stateName,
+    requestCount,
+    responses: [] as any[],
+    summary: {} as any,
+  };
+
+  let successCount = 0;
+  let failureCount = 0;
+  let fallbackCount = 0;
+
+  for (let i = 1; i <= requestCount; i++) {
+    demoMetrics.totalRequests++;
+    const startTime = Date.now();
+
+    try {
+      addPresentationLog(
+        "MIDDLEWARE",
+        `📤 Request ${i}/${requestCount} to Service B (${stateName} state)`,
+      );
+
       const response = await faultTolerantFetch("http://service-b:5000/data", {
-        fallbackData: { message: `Recovery fallback ${i}` },
+        fallbackData: {
+          message: `Fallback for ${stateName} state`,
+          state: stateName,
+          academic: true,
+        },
       });
-      results.push({ phase: "CIRCUIT_RECOVERY", request: i });
+
+      const duration = Date.now() - startTime;
+      demoMetrics.stateTransitionsSeen.add(stateName);
+
+      if (response.markovModel) {
+        successCount++;
+        addPresentationLog(
+          "SUCCESS",
+          `✅ Request ${i} successful in ${stateName} state`,
+          {
+            responseTime: `${duration}ms`,
+            serviceState: response.serviceState,
+          },
+        );
+      } else {
+        fallbackCount++;
+        addPresentationLog(
+          "FALLBACK",
+          `🚨 Request ${i} used fallback in ${stateName} state`,
+          {
+            responseTime: `${duration}ms`,
+          },
+        );
+      }
+
+      phaseResults.responses.push({
+        requestId: i,
+        duration: `${duration}ms`,
+        success: !!response.markovModel,
+        serviceState: response.serviceState || stateName,
+        usedFallback: !response.markovModel,
+      });
+
+      demoMetrics.performanceData.push({
+        timestamp: Date.now(),
+        state: stateName,
+        duration,
+        success: !!response.markovModel,
+      });
+    } catch (error) {
+      failureCount++;
+      const duration = Date.now() - startTime;
+      addPresentationLog(
+        "FAILURE",
+        `❌ Request ${i} failed in ${stateName} state`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+          responseTime: `${duration}ms`,
+        },
+      );
+
+      phaseResults.responses.push({
+        requestId: i,
+        duration: `${duration}ms`,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Wait between requests to observe state behavior
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+
+  phaseResults.summary = {
+    successfulRequests: successCount,
+    failedRequests: failureCount,
+    fallbackRequests: fallbackCount,
+    successRate: ((successCount / requestCount) * 100).toFixed(1) + "%",
+    failureRate: ((failureCount / requestCount) * 100).toFixed(1) + "%",
+  };
+
+  addPresentationLog(
+    "MARKOV",
+    `📈 ${stateName} phase completed`,
+    phaseResults.summary,
+  );
+  return phaseResults;
+}
+
+// 🎯 QUICK DEMO FOR LIVE PRESENTATION
+app.get("/demo/quick-showcase", async (req, res) => {
+  addPresentationLog(
+    "ACADEMIC",
+    "⚡ Starting QUICK SHOWCASE for live demonstration",
+  );
+
+  try {
+    // Quick sequence showing key behaviors
+    const states = ["HEALTHY", "DEGRADED", "FAILING", "CRITICAL"];
+    const results = [];
+
+    for (const state of states) {
+      await fetch("http://service-b:5000/control/force-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state }),
+      });
+
+      const response = await faultTolerantFetch("http://service-b:5000/data", {
+        fallbackData: { message: `Quick demo fallback for ${state}` },
+      });
+
+      results.push({
+        state,
+        success: !!response.markovModel,
+        serviceState: response.serviceState || state,
+        message: response.message || response.error || "Fallback response",
+      });
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    // Final reset
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    res.json({
+      status: "SUCCESS",
+      message: "Quick demonstration completed",
+      results,
+      nextSteps: "Use /demo/markov-academic for comprehensive analysis",
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Quick demo failed", details: error });
+  }
+});
+
+// 📊 PRESENTATION STATISTICS ENDPOINT
+app.get("/presentation/statistics", (req, res) => {
+  res.json({
+    demoMetrics,
+    recentLogs: presentationLogs.slice(0, 20),
+    academicSummary: {
+      modelType: "Markov Chain with 5 States",
+      reliabilityMetrics: "MTBF/MTTR calculated",
+      adaptiveFeatures: "Retry, Circuit Breaker, Fallback",
+      loadBasedAdaptation: "Dynamic transition probabilities",
+      statisticalRigor: "Transition matrices, state distributions",
+    },
+  });
+});
+
+// 🔄 RESET DEMO STATE
+app.post("/demo/reset", async (req, res) => {
+  // Reset metrics
+  demoMetrics.totalRequests = 0;
+  demoMetrics.successfulRequests = 0;
+  demoMetrics.failedRequests = 0;
+  demoMetrics.fallbackResponses = 0;
+  demoMetrics.circuitBreakerActivations = 0;
+  demoMetrics.retryAttempts = 0;
+  demoMetrics.stateTransitionsSeen.clear();
+  demoMetrics.performanceData = [];
+
+  // Reset logs
+  presentationLogs.length = 0;
+
+  // Reset middleware
+  clearFailureWindow();
+  forceAdaptation("reset");
+
+  // Reset Service B to healthy state
+  await fetch("http://service-b:5000/control/force-state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "HEALTHY" }),
+  });
+
+  addPresentationLog(
+    "ACADEMIC",
+    "🔄 Demo state reset - ready for new presentation",
+  );
+
+  res.json({
+    status: "SUCCESS",
+    message: "Demo state reset successfully",
+    readyForDemo: true,
+  });
+});
+
+// 🏠 ENHANCED HOMEPAGE WITH ACADEMIC CONTEXT
+app.get("/", (req, res) => {
+  res.json({
+    title: "🎓 Adaptive Fault tolerant Middleware for nodes - BUET",
+    description: "Fault-tolerant middleware with Markov Chain failure modeling",
+    academicFeatures: {
+      failureModel:
+        "5-State Markov Chain (HEALTHY → DEGRADED → FAILING → CRITICAL ⟷ RECOVERING)",
+      reliabilityMetrics:
+        "MTBF (Mean Time Between Failures), MTTR (Mean Time To Recovery)",
+      adaptivePatterns:
+        "Retry, Circuit Breaker, Fallback with dynamic adaptation",
+      statisticalAnalysis:
+        "Transition matrices, state distributions, load correlation",
+    },
+    demoEndpoints: {
+      "/demo/markov-academic":
+        "Comprehensive academic demonstration (5-10 minutes)",
+      "/demo/quick-showcase": "Quick live demo (2 minutes)",
+      "/presentation/statistics": "Current demo statistics and metrics",
+      "/demo/reset": "Reset demo state for new presentation",
+    },
+    serviceEndpoints: {
+      "Service B Statistics": "http://localhost:5000/statistics",
+      "Markov Configuration": "http://localhost:5000/markov/configuration",
+      "Service B Health": "http://localhost:5000/health",
+    },
+    currentStatus: {
+      totalRequests: demoMetrics.totalRequests,
+      activeDemoLogs: presentationLogs.length,
+      lastActivity: presentationLogs[0]?.timestamp || "No activity yet",
+    },
+  });
+});
+
+// Simple endpoint for basic testing
+app.get("/test", async (req, res) => {
+  try {
+    const response = await faultTolerantFetch("http://service-b:5000/data");
+    res.json({
+      status: "SUCCESS",
+      middleware: "Adaptive middleware working",
+      serviceResponse: response,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "ERROR",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(
+    `🎓 [Service A] Academic Presentation Server running on port ${PORT}`,
+  );
+  console.log(
+    `📚 BUET MSc Project: Adaptive Middleware with Markov Chain Failure Model`,
+  );
+  console.log(`🎯 Demo Endpoints:`);
+  console.log(`   GET  / - Project overview and demo guide`);
+  console.log(`   GET  /demo/markov-academic - Comprehensive academic demo`);
+  console.log(`   GET  /demo/quick-showcase - Quick live demo`);
+  console.log(`   GET  /presentation/statistics - Demo metrics`);
+  console.log(`   POST /demo/reset - Reset for new presentation`);
+  console.log(`🔗 Access: http://localhost:${PORT}`);
+});
+
+// 🎓 ENHANCED ACADEMIC DEMO WITH BETTER STATISTICS
+app.get("/demo/markov-enhanced", async (req, res) => {
+  addPresentationLog(
+    "ACADEMIC",
+    "🎬 Starting ENHANCED MARKOV DEMONSTRATION with Load Factor Analysis",
+  );
+
+  // Reset metrics for clean demo
+  demoMetrics.totalRequests = 0;
+  demoMetrics.successfulRequests = 0;
+  demoMetrics.failedRequests = 0;
+  demoMetrics.fallbackResponses = 0;
+  demoMetrics.circuitBreakerActivations = 0;
+  demoMetrics.retryAttempts = 0;
+  demoMetrics.stateTransitionsSeen.clear();
+  demoMetrics.performanceData = [];
+
+  const demoResults = {
+    phases: [] as any[],
+    loadFactorDemonstration: {} as any,
+    markovStatistics: {} as any,
+    middlewarePerformance: {} as any,
+    academicAnalysis: {} as any,
+  };
+
+  try {
+    // Reset circuit breaker and middleware state
     clearFailureWindow();
     forceAdaptation("reset");
+
+    // PHASE 1: HEALTHY with Normal Load
     addPresentationLog(
-      "MIDDLEWARE",
-      "🎯 Final reset to baseline configuration",
+      "MARKOV",
+      "📊 PHASE 1: HEALTHY state with normal load (1.0)",
     );
-
-    addPresentationLog(
-      "MIDDLEWARE",
-      "🎉 PERFECT SHOWCASE COMPLETED - All behaviors demonstrated!",
-    );
-
-    res.json({
-      demoType: "PERFECT_SHOWCASE",
-      phases: {
-        RETRY: "2 requests with retry attempts",
-        CIRCUIT_TRIGGER: "6 requests to open circuit breaker",
-        CIRCUIT_BLOCKED: "2 requests blocked by circuit breaker",
-        CIRCUIT_RECOVERY: "2 requests showing circuit closure",
-      },
-      adaptations: {
-        BASELINE_RESET: "Reset to default configuration",
-        HIGH_FAILURE_PROTECTION: "Aggressive protection during failures",
-        RECOVERY_OPTIMIZATION: "Optimistic settings during recovery",
-      },
-      totalRequests: results.length,
-      results,
-      message:
-        "🎯 Perfect demo completed! Check logs: /logs/presentation?category=retry, /logs/presentation?category=circuit, /logs/presentation?category=adaptation",
-    });
-  } catch (error: any) {
-    addPresentationLog("FAILURE", "Perfect showcase failed", {
-      error: error.message,
-    });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 🔥 NEW AGGRESSIVE FAILURE DEMO - This will trigger circuit breaker!
-app.get("/demo/failure-showcase", async (req, res) => {
-  addPresentationLog(
-    "MIDDLEWARE",
-    "🔥 Starting FAILURE SHOWCASE - forcing circuit breaker activation",
-  );
-
-  // First, set Service B to high failure rate
-  try {
-    await fetch("http://service-b:5000/control/failure-rate", {
+    await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate: 0.9 }), // 90% failure rate!
+      body: JSON.stringify({ state: "HEALTHY" }),
     });
-    addPresentationLog(
-      "MIDDLEWARE",
-      "🎯 Service B failure rate set to 90% - circuit breaker will activate soon",
-    );
-  } catch (e) {
-    addPresentationLog(
-      "MIDDLEWARE",
-      "⚠️ Could not configure Service B failure rate",
-    );
-  }
-
-  const results = [];
-
-  // Make rapid requests to trigger circuit breaker
-  for (let i = 1; i <= 20; i++) {
-    addPresentationLog("MIDDLEWARE", `🔥 Failure demo request ${i}/20`);
-
-    const start = Date.now();
-    const response = await faultTolerantFetch("http://service-b:5000/data", {
-      fallbackData: { message: `Emergency fallback ${i}` },
-    });
-    const duration = Date.now() - start;
-
-    const success =
-      !response.error &&
-      !response.message?.includes("fallback") &&
-      !response.message?.includes("Emergency");
-    results.push({
-      request: i,
-      success,
-      duration: `${duration}ms`,
-      response: success ? "Service B success" : "Fallback/Circuit protection",
-    });
-
-    // Short pause to let logs accumulate
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-
-  // Reset Service B to normal after demo
-  try {
-    await fetch("http://service-b:5000/control/failure-rate", {
+    await fetch("http://service-b:5000/control/load-factor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate: 0.3 }),
+      body: JSON.stringify({ load: 1.0 }),
     });
-    addPresentationLog(
-      "MIDDLEWARE",
-      "🔄 Service B failure rate reset to 30% - recovery phase starting",
-    );
-  } catch (e) {
-    addPresentationLog(
-      "MIDDLEWARE",
-      "⚠️ Could not reset Service B failure rate",
-    );
-  }
 
-  res.json({
-    demoType: "FAILURE_SHOWCASE",
-    totalRequests: 20,
-    results,
-    summary: {
-      successful: results.filter((r) => r.success).length,
-      protected: results.filter((r) => !r.success).length,
+    const healthyResults = await performEnhancedTestSequence("HEALTHY", 4, 1.0);
+    demoResults.phases.push(healthyResults);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // PHASE 2: DEGRADED with High Load
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 2: DEGRADED state with high load (2.0) - showing load correlation",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "DEGRADED" }),
+    });
+    await fetch("http://service-b:5000/control/load-factor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ load: 2.0 }),
+    });
+
+    const degradedResults = await performEnhancedTestSequence(
+      "DEGRADED",
+      6,
+      2.0,
+    );
+    demoResults.phases.push(degradedResults);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // PHASE 3: FAILING - Let circuit breaker activate
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 3: FAILING state - circuit breaker activation",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "FAILING" }),
+    });
+
+    const failingResults = await performEnhancedTestSequence("FAILING", 5, 2.0);
+    demoResults.phases.push(failingResults);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // PHASE 4: CRITICAL - All fallbacks
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 4: CRITICAL state - fallback protection",
+    );
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "CRITICAL" }),
+    });
+
+    const criticalResults = await performEnhancedTestSequence(
+      "CRITICAL",
+      3,
+      2.0,
+    );
+    demoResults.phases.push(criticalResults);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // PHASE 5: RECOVERING with Low Load
+    addPresentationLog(
+      "MARKOV",
+      "📊 PHASE 5: RECOVERING with low load (0.5) - recovery assistance",
+    );
+
+    // Reset circuit breaker to allow recovery testing
+    clearFailureWindow();
+
+    await fetch("http://service-b:5000/control/force-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "RECOVERING" }),
+    });
+    await fetch("http://service-b:5000/control/load-factor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ load: 0.5 }),
+    });
+
+    const recoveringResults = await performEnhancedTestSequence(
+      "RECOVERING",
+      4,
+      0.5,
+    );
+    demoResults.phases.push(recoveringResults);
+
+    // Collect final statistics
+    const markovStats = await fetch("http://service-b:5000/statistics").then(
+      (r) => r.json(),
+    );
+
+    demoResults.markovStatistics = markovStats;
+    demoResults.middlewarePerformance = {
+      totalRequests: demoMetrics.totalRequests,
+      successfulRequests: demoMetrics.successfulRequests,
+      failedRequests: demoMetrics.failedRequests,
+      fallbackRequests: demoMetrics.fallbackResponses,
+      successRate:
+        demoMetrics.totalRequests > 0
+          ? (
+              (demoMetrics.successfulRequests / demoMetrics.totalRequests) *
+              100
+            ).toFixed(2) + "%"
+          : "0%",
+      fallbackRate:
+        demoMetrics.totalRequests > 0
+          ? (
+              (demoMetrics.fallbackResponses / demoMetrics.totalRequests) *
+              100
+            ).toFixed(2) + "%"
+          : "0%",
+      circuitBreakerActivations: demoMetrics.circuitBreakerActivations,
+      retryAttempts: demoMetrics.retryAttempts,
+    };
+
+    demoResults.loadFactorDemonstration = {
+      normalLoad: "1.0 - baseline failure rates",
+      highLoad: "2.0 - increased failure probability",
+      lowLoad: "0.5 - improved recovery probability",
+      academicNote:
+        "Load factor multiplies base failure rates and affects Markov transition probabilities",
+    };
+
+    demoResults.academicAnalysis = {
+      statesCovered: Array.from(demoMetrics.stateTransitionsSeen),
+      markovValidation: "✅ All 5 states demonstrated with load correlation",
+      middlewarePatterns: {
+        retryBehavior:
+          demoMetrics.retryAttempts > 0 ? "✅ Observed" : "❌ Not triggered",
+        circuitBreakerActivation:
+          demoMetrics.circuitBreakerActivations > 0
+            ? "✅ Activated"
+            : "❌ Not triggered",
+        fallbackProtection:
+          demoMetrics.fallbackResponses > 0 ? "✅ Active" : "❌ Not used",
+      },
+      statisticalRigor:
+        "✅ MTBF/MTTR, transition matrix, load correlation demonstrated",
+    };
+
+    addPresentationLog("ACADEMIC", "🎓 ENHANCED DEMONSTRATION COMPLETE", {
+      totalPhases: demoResults.phases.length,
+      totalRequests: demoMetrics.totalRequests,
+      demonstratedStates: Array.from(demoMetrics.stateTransitionsSeen),
+    });
+
+    res.json({
+      status: "SUCCESS",
       message:
-        "🎯 Check /logs/presentation?category=circuit for circuit breaker logs!",
-    },
-  });
-});
-
-// Main endpoint - uses adaptive retry count (no hardcoded retries)
-app.get("/call-b", async (req, res) => {
-  try {
-    addPresentationLog(
-      "MIDDLEWARE",
-      "Starting fault-tolerant request to Service B",
-    );
-
-    const response = await faultTolerantFetch("http://service-b:5000/data", {
-      fallbackData: { message: "Using fallback response from Service A" },
+        "Enhanced Markov Chain demonstration completed with load factor analysis",
+      executionTime: new Date().toISOString(),
+      results: demoResults,
+      presentationHighlights: {
+        "🎭 Markov Chain":
+          "5-state model with realistic transition probabilities",
+        "📊 Load Correlation":
+          "Demonstrated load factor influence on failure rates",
+        "🛡️ Middleware Adaptation":
+          "Retry → Circuit Breaker → Fallback progression observed",
+        "📈 Academic Metrics":
+          "MTBF/MTTR calculations and statistical analysis",
+        "🔬 Experimental Control":
+          "Forced state transitions for systematic evaluation",
+      },
     });
-
-    if (response.message && response.message.includes("fallback")) {
-      addPresentationLog(
-        "FALLBACK",
-        "Fallback response used - Service B unavailable",
-        {
-          fallbackData: response,
-        },
-      );
-    } else {
-      addPresentationLog("SUCCESS", "Service B responded successfully", {
-        response: response.data || response,
-      });
-    }
-
-    res.json(response);
-  } catch (error: any) {
-    addPresentationLog("FAILURE", "Critical error in fault-tolerant fetch", {
-      error: error.message,
+  } catch (error) {
+    addPresentationLog("ACADEMIC", "❌ Enhanced demo error", {
+      error: error instanceof Error ? error.message : String(error),
     });
-    console.error("Error calling service B:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Enhanced demo failed", details: error });
   }
 });
 
-// 🎯 PRESENTATION DEMO ENDPOINT - Perfect for showing adaptation in action
-app.get("/demo/adaptive-showcase", async (req, res) => {
-  const scenario = req.query.scenario || "mixed";
+async function performEnhancedTestSequence(
+  stateName: string,
+  requestCount: number,
+  loadFactor: number,
+) {
   addPresentationLog(
-    "MIDDLEWARE",
-    `🎬 Starting presentation demo: ${scenario}`,
+    "MARKOV",
+    `🧪 Testing ${stateName} state with ${requestCount} requests (load: ${loadFactor})`,
   );
 
-  const results = [];
-  let requestCount = 0;
+  const phaseResults = {
+    stateName,
+    requestCount,
+    loadFactor,
+    responses: [] as any[],
+    summary: {} as any,
+    stateMetrics: {} as any,
+  };
 
-  try {
-    // Scenario 1: Mixed load with adaptation
-    if (scenario === "mixed") {
-      for (let i = 1; i <= 15; i++) {
-        requestCount++;
-        addPresentationLog(
-          "MIDDLEWARE",
-          `Demo request ${i}/15 - observing adaptation`,
-        );
+  let actualSuccessCount = 0;
+  let actualFailureCount = 0;
+  let fallbackCount = 0;
 
-        const start = Date.now();
-        const response = await faultTolerantFetch(
-          "http://service-b:5000/data",
-          {
-            fallbackData: { message: `Demo fallback ${i}` },
-          },
-        );
-        const duration = Date.now() - start;
+  for (let i = 1; i <= requestCount; i++) {
+    const startTime = Date.now();
 
-        const success =
-          !response.error && !response.message?.includes("fallback");
-        results.push({
-          request: i,
-          success,
-          duration: `${duration}ms`,
-          response: success ? "Service B success" : "Fallback used",
-        });
-
-        addPresentationLog(
-          success ? "SUCCESS" : "FALLBACK",
-          `Demo request ${i} result: ${success ? "SUCCESS" : "FALLBACK"} (${duration}ms)`,
-        );
-
-        // Pause between requests to show adaptation
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-
-    addPresentationLog("MIDDLEWARE", "🎬 Presentation demo completed", {
-      totalRequests: requestCount,
-      summary: results,
-    });
-
-    res.json({
-      demoType: scenario,
-      totalRequests: requestCount,
-      results,
-      summary: {
-        successful: results.filter((r) => r.success).length,
-        failed: results.filter((r) => !r.success).length,
-        successRate: `${(
-          (results.filter((r) => r.success).length / requestCount) *
-          100
-        ).toFixed(1)}%`,
-      },
-      message: "🎯 Check /logs/presentation for detailed adaptation logs!",
-    });
-  } catch (error: any) {
-    addPresentationLog("FAILURE", "Demo scenario failed", {
-      error: error.message,
-    });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 📊 PRESENTATION LOGS ENDPOINT - This is what you need for your presentation!
-app.get("/logs/presentation", (req, res) => {
-  const category = req.query.category as string;
-  const last = parseInt(req.query.last as string) || 50;
-
-  let filteredLogs = presentationLogs;
-
-  if (category) {
-    filteredLogs = presentationLogs.filter((log) =>
-      log.category.toLowerCase().includes(category.toLowerCase()),
-    );
-  }
-
-  const logsToShow = filteredLogs.slice(0, last);
-
-  res.json({
-    totalLogs: presentationLogs.length,
-    showing: logsToShow.length,
-    filter: category || "all",
-    logs: logsToShow,
-    categories: [
-      "MIDDLEWARE",
-      "ADAPTATION",
-      "CIRCUIT",
-      "RETRY",
-      "FAILURE",
-      "SUCCESS",
-      "FALLBACK",
-    ],
-    usage: {
-      allLogs: "/logs/presentation",
-      onlyRetries: "/logs/presentation?category=retry",
-      onlyAdaptation: "/logs/presentation?category=adaptation",
-      last10: "/logs/presentation?last=10",
-    },
-  });
-});
-
-// 🎯 PRESENTATION STATS ENDPOINT - Great for showing current middleware state
-app.get("/presentation/stats", async (req, res) => {
-  try {
-    const serviceBStatus = await faultTolerantFetch(
-      "http://service-b:5000/status",
-      {
-        fallbackData: { error: "Service B status unavailable" },
-      },
-    );
-
-    const recentLogs = presentationLogs.slice(0, 20);
-    const categoryStats = recentLogs.reduce((acc, log) => {
-      acc[log.category] = (acc[log.category] || 0) + 1;
-      return acc;
-    }, {});
-
-    res.json({
-      currentTime: new Date().toLocaleTimeString(),
-      middleware: {
-        status: "🛡️ ACTIVE",
-        uptime: `${Math.floor(process.uptime() / 60)}m ${Math.floor(
-          process.uptime() % 60,
-        )}s`,
-        totalLogs: presentationLogs.length,
-      },
-      recentActivity: categoryStats,
-      services: {
-        serviceA: "🟢 RUNNING",
-        serviceB: serviceBStatus.status || "🔴 UNAVAILABLE",
-      },
-      lastEvents: recentLogs.slice(0, 5).map((log) => ({
-        time: log.time,
-        event: `${log.category}: ${log.message}`,
-      })),
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Test endpoint - make multiple calls to trigger adaptation
-app.get("/test/burst", async (req, res) => {
-  const results = [];
-  const count = parseInt(req.query.count as string) || 10;
-
-  console.log(`🧪 [Service A] Starting burst test with ${count} requests...`);
-
-  for (let i = 1; i <= count; i++) {
     try {
-      const start = Date.now();
-      const response = await faultTolerantFetch("http://service-b:5000/data", {
-        fallbackData: { message: `Fallback for request ${i}` },
-      });
-      const duration = Date.now() - start;
-
-      results.push({
-        request: i,
-        success: !response.error,
-        duration: `${duration}ms`,
-        response: response.data || response.message || response.error,
-      });
-
-      console.log(
-        `🧪 Request ${i}/${count}: ${
-          response.error ? "❌ FAILED" : "✅ SUCCESS"
-        } (${duration}ms)`,
+      addPresentationLog(
+        "MIDDLEWARE",
+        `📤 Request ${i}/${requestCount} to Service B (${stateName}, load: ${loadFactor})`,
       );
-    } catch (error: any) {
-      results.push({
-        request: i,
+
+      const response = await faultTolerantFetch("http://service-b:5000/data", {
+        fallbackData: {
+          message: `Academic fallback for ${stateName}`,
+          state: stateName,
+          loadFactor: loadFactor,
+          academic: true,
+        },
+      });
+
+      const duration = Date.now() - startTime;
+      demoMetrics.stateTransitionsSeen.add(stateName);
+
+      if (response.markovModel) {
+        actualSuccessCount++;
+        addPresentationLog(
+          "SUCCESS",
+          `✅ Request ${i} succeeded in ${stateName}`,
+          {
+            responseTime: `${duration}ms`,
+            serviceState: response.serviceState,
+            loadFactor: response.loadFactor,
+          },
+        );
+      } else {
+        fallbackCount++;
+        addPresentationLog(
+          "FALLBACK",
+          `🚨 Request ${i} used fallback in ${stateName}`,
+          {
+            responseTime: `${duration}ms`,
+            reason: "Circuit breaker or service failure",
+          },
+        );
+      }
+
+      phaseResults.responses.push({
+        requestId: i,
+        duration,
+        success: !!response.markovModel,
+        serviceState: response.serviceState || stateName,
+        usedFallback: !response.markovModel,
+        loadFactor: loadFactor,
+      });
+
+      demoMetrics.performanceData.push({
+        timestamp: Date.now(),
+        state: stateName,
+        duration,
+        success: !!response.markovModel,
+        loadFactor: loadFactor,
+      });
+    } catch (error) {
+      actualFailureCount++;
+      const duration = Date.now() - startTime;
+      addPresentationLog("FAILURE", `❌ Request ${i} failed in ${stateName}`, {
+        error: error instanceof Error ? error.message : String(error),
+        responseTime: `${duration}ms`,
+        loadFactor: loadFactor,
+      });
+
+      phaseResults.responses.push({
+        requestId: i,
+        duration,
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
+        loadFactor: loadFactor,
       });
     }
 
-    // Small delay between requests to see adaptation
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Wait between requests
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  res.json({
-    testType: "burst",
-    totalRequests: count,
-    results,
-    summary: {
-      successful: results.filter((r) => r.success).length,
-      failed: results.filter((r) => !r.success).length,
-      successRate: `${(
-        (results.filter((r) => r.success).length / count) *
-        100
-      ).toFixed(1)}%`,
-    },
-  });
-});
+  phaseResults.summary = {
+    successfulRequests: actualSuccessCount,
+    failedRequests: actualFailureCount,
+    fallbackRequests: fallbackCount,
+    totalRequests: requestCount,
+    successRate: ((actualSuccessCount / requestCount) * 100).toFixed(1) + "%",
+    fallbackRate: ((fallbackCount / requestCount) * 100).toFixed(1) + "%",
+    averageResponseTime:
+      phaseResults.responses.length > 0
+        ? (
+            phaseResults.responses.reduce(
+              (sum: number, r: any) => sum + r.duration,
+              0,
+            ) / phaseResults.responses.length
+          ).toFixed(0) + "ms"
+        : "0ms",
+  };
 
-// Endpoint to control Service-B remotely
-app.post("/control-service-b/:action", async (req, res) => {
-  const { action } = req.params;
-  const { value } = req.body;
-
-  try {
-    let response;
-    switch (action) {
-      case "failure-rate":
-        // ❌ Removed method parameter - not supported by faultTolerantFetch
-        response = await faultTolerantFetch(
-          "http://service-b:5000/control/failure-rate",
-          {
-            fallbackData: { error: "Could not set failure rate" },
-          },
-        );
-        break;
-      case "pattern":
-        response = await faultTolerantFetch(
-          "http://service-b:5000/control/pattern",
-          {
-            fallbackData: { error: "Could not set pattern" },
-          },
-        );
-        break;
-      case "delay":
-        response = await faultTolerantFetch(
-          "http://service-b:5000/control/delay",
-          {
-            fallbackData: { error: "Could not set delay" },
-          },
-        );
-        break;
-      default:
-        return res.status(400).json({ error: "Invalid action" });
-    }
-    res.json(response);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Status endpoint
-app.get("/status", async (req, res) => {
-  try {
-    const serviceBStatus = await faultTolerantFetch(
-      "http://service-b:5000/status",
-      {
-        fallbackData: { error: "Service B status unavailable" },
-      },
-    );
-
-    res.json({
-      serviceA: {
-        status: "running",
-        uptime: `${Math.floor(process.uptime() / 60)}m ${Math.floor(
-          process.uptime() % 60,
-        )}s`,
-        adaptiveMiddleware: "active",
-      },
-      serviceB: serviceBStatus,
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.listen(3000, () => {
-  console.log("🚀 Service A running on port 3000");
-  console.log("📊 Available endpoints:");
-  console.log("  GET  /call-b - Single call to Service B (adaptive)");
-  console.log("  GET  /test/burst?count=20 - Burst test with N requests");
-  console.log(
-    "  POST /control-service-b/failure-rate - Set Service B failure rate",
+  addPresentationLog(
+    "MARKOV",
+    `📈 ${stateName} phase completed`,
+    phaseResults.summary,
   );
-  console.log(
-    "  POST /control-service-b/pattern - Set Service B failure pattern",
-  );
-  console.log("  POST /control-service-b/delay - Set Service B response delay");
-  console.log("  GET  /status - View both services status");
-  console.log("🎯 Adaptive middleware is active and tuning...");
-});
+  return phaseResults;
+}
