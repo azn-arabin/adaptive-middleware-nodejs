@@ -6,6 +6,8 @@
  * providing realistic failure patterns for testing adaptive middleware
  */
 
+import { EventEmitter } from "events";
+
 export enum ServiceState {
   HEALTHY = "HEALTHY",
   DEGRADED = "DEGRADED",
@@ -52,7 +54,19 @@ export class MarkovFailureModel {
   private lastTransitionTime: number = Date.now();
   private loadFactor: number = 1.0; // External load influence
 
-  constructor() {
+  // New: seeded RNG and configurable transition interval
+  private random: () => number;
+  private minTransitionIntervalMs: number;
+  private maxTransitionIntervalMs: number;
+
+  // Event emitter for external hooks
+  private emitter: EventEmitter = new EventEmitter();
+
+  constructor(options?: {
+    seed?: number;
+    minTransitionIntervalMs?: number;
+    maxTransitionIntervalMs?: number;
+  }) {
     this.transitionMatrix = new Map();
     this.stateMetrics = new Map();
     this.statistics = {
@@ -68,10 +82,33 @@ export class MarkovFailureModel {
       stateDistribution: new Map(),
     };
 
+    // Initialize RNG - if seed provided use deterministic PRNG, otherwise use Math.random
+    const seed = options?.seed;
+    if (typeof seed === "number") {
+      this.random = this.createSeededRandom(seed);
+    } else {
+      this.random = Math.random;
+    }
+
+    // Configure transition interval bounds (defaults: 5000-15000 ms)
+    this.minTransitionIntervalMs = options?.minTransitionIntervalMs ?? 5000;
+    this.maxTransitionIntervalMs = options?.maxTransitionIntervalMs ?? 15000;
+
     this.initializeTransitionMatrix();
     this.initializeStateMetrics();
     this.initializeStatistics();
     this.startStateTransitionTimer();
+  }
+
+  // Mulberry32 PRNG for deterministic behavior when seeded
+  private createSeededRandom(seed: number): () => number {
+    let t = seed >>> 0;
+    return function () {
+      t += 0x6d2b79f5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
   private initializeTransitionMatrix() {
@@ -199,8 +236,8 @@ export class MarkovFailureModel {
       [
         ServiceState.HEALTHY,
         {
-          failureRate: 0.05, // 5% failure rate
-          responseDelay: 50, // 50ms average delay
+          failureRate: 0.05,
+          responseDelay: 50,
           errorTypes: [
             { status: 500, message: "Minor Internal Error", weight: 0.6 },
             { status: 503, message: "Temporary Unavailable", weight: 0.4 },
@@ -210,8 +247,8 @@ export class MarkovFailureModel {
       [
         ServiceState.DEGRADED,
         {
-          failureRate: 0.25, // 25% failure rate
-          responseDelay: 200, // 200ms average delay
+          failureRate: 0.25,
+          responseDelay: 200,
           errorTypes: [
             { status: 500, message: "Internal Server Error", weight: 0.4 },
             { status: 503, message: "Service Degraded", weight: 0.3 },
@@ -222,8 +259,8 @@ export class MarkovFailureModel {
       [
         ServiceState.FAILING,
         {
-          failureRate: 0.6, // 60% failure rate
-          responseDelay: 800, // 800ms average delay
+          failureRate: 0.6,
+          responseDelay: 800,
           errorTypes: [
             { status: 500, message: "System Overloaded", weight: 0.3 },
             { status: 503, message: "Service Failing", weight: 0.4 },
@@ -235,8 +272,8 @@ export class MarkovFailureModel {
       [
         ServiceState.CRITICAL,
         {
-          failureRate: 0.9, // 90% failure rate
-          responseDelay: 2000, // 2000ms average delay
+          failureRate: 0.9,
+          responseDelay: 2000,
           errorTypes: [
             { status: 503, message: "Service Critical", weight: 0.5 },
             { status: 500, message: "Critical System Error", weight: 0.3 },
@@ -247,8 +284,8 @@ export class MarkovFailureModel {
       [
         ServiceState.RECOVERING,
         {
-          failureRate: 0.35, // 35% failure rate (better than failing)
-          responseDelay: 400, // 400ms average delay
+          failureRate: 0.35,
+          responseDelay: 400,
           errorTypes: [
             { status: 503, message: "Service Recovering", weight: 0.6 },
             { status: 500, message: "Recovery Error", weight: 0.4 },
@@ -276,23 +313,26 @@ export class MarkovFailureModel {
   }
 
   private startStateTransitionTimer() {
-    // Check for state transitions every 5-15 seconds (random)
-    const checkInterval = 5000 + Math.random() * 10000;
+    const interval =
+      this.minTransitionIntervalMs +
+      Math.floor(
+        this.random() *
+          (this.maxTransitionIntervalMs - this.minTransitionIntervalMs),
+      );
 
     setTimeout(() => {
       this.checkStateTransition();
       this.startStateTransitionTimer();
-    }, checkInterval);
+    }, interval);
   }
 
   private checkStateTransition() {
     const transitions = this.transitionMatrix.get(this.currentState);
     if (!transitions) return;
 
-    // Apply load factor influence on transition probabilities
     const adjustedTransitions = this.adjustTransitionsForLoad(transitions);
 
-    const random = Math.random();
+    const random = this.random();
     let cumulativeProbability = 0;
 
     for (const transition of adjustedTransitions) {
@@ -309,12 +349,10 @@ export class MarkovFailureModel {
   private adjustTransitionsForLoad(
     transitions: StateTransition[],
   ): StateTransition[] {
-    // Higher load increases probability of moving to worse states
-    return transitions.map((transition) => {
+    const adjusted = transitions.map((transition) => {
       let adjustedProbability = transition.probability;
 
       if (this.loadFactor > 1.5) {
-        // High load: increase probability of degradation
         if (
           transition.to === ServiceState.DEGRADED ||
           transition.to === ServiceState.FAILING ||
@@ -325,7 +363,6 @@ export class MarkovFailureModel {
           adjustedProbability *= 0.7;
         }
       } else if (this.loadFactor < 0.5) {
-        // Low load: increase probability of recovery
         if (
           transition.to === ServiceState.HEALTHY ||
           transition.to === ServiceState.RECOVERING
@@ -336,28 +373,84 @@ export class MarkovFailureModel {
 
       return { ...transition, probability: adjustedProbability };
     });
+
+    // robust normalization
+    let sum = adjusted.reduce(
+      (s, t) => s + (Number.isFinite(t.probability) ? t.probability : 0),
+      0,
+    );
+    if (!Number.isFinite(sum) || sum <= 0) {
+      const origSum = transitions.reduce(
+        (s, t) => s + (Number.isFinite(t.probability) ? t.probability : 0),
+        0,
+      );
+      if (Number.isFinite(origSum) && origSum > 0) {
+        return transitions.map((t) => ({
+          ...t,
+          probability: t.probability / origSum,
+        }));
+      }
+      const uniform = 1 / transitions.length;
+      return transitions.map((t) => ({ ...t, probability: uniform }));
+    }
+
+    const normalized = adjusted.map((t) => ({
+      ...t,
+      probability: t.probability / sum,
+    }));
+    const total = normalized.reduce((s, t) => s + t.probability, 0);
+    const diff = 1 - total;
+    if (Math.abs(diff) > 1e-12) {
+      let maxIdx = 0;
+      for (let i = 1; i < normalized.length; i++) {
+        if (normalized[i].probability > normalized[maxIdx].probability)
+          maxIdx = i;
+      }
+      normalized[maxIdx] = {
+        ...normalized[maxIdx],
+        probability: normalized[maxIdx].probability + diff,
+      };
+    }
+
+    return normalized;
+  }
+
+  // Allow external code to listen for transitions
+  public onTransition(
+    callback: (from: ServiceState, to: ServiceState) => void,
+  ) {
+    this.emitter.on(
+      "transition",
+      ({ from, to }: { from: ServiceState; to: ServiceState }) =>
+        callback(from, to),
+    );
   }
 
   private transitionToState(newState: ServiceState) {
     const now = Date.now();
     const stateDuration = now - this.stateStartTime;
 
-    // Record transition statistics
     const transitionKey = `${this.currentState}->${newState}`;
     const currentCount =
       this.statistics.transitionCount.get(transitionKey) || 0;
     this.statistics.transitionCount.set(transitionKey, currentCount + 1);
 
-    // Update state history
     this.statistics.stateHistory.push({
       state: newState,
       timestamp: now,
       duration: stateDuration,
     });
-
-    // Keep only last 100 state changes
-    if (this.statistics.stateHistory.length > 100) {
+    if (this.statistics.stateHistory.length > 100)
       this.statistics.stateHistory.shift();
+
+    // Emit transition event for external listeners
+    try {
+      this.emitter.emit("transition", {
+        from: this.currentState,
+        to: newState,
+      });
+    } catch (e) {
+      // ignore emitter errors
     }
 
     console.log(
@@ -378,39 +471,32 @@ export class MarkovFailureModel {
     this.statistics.totalRequests++;
 
     const stateMetric = this.stateMetrics.get(this.currentState);
-    if (!stateMetric) {
+    if (!stateMetric)
       throw new Error(`No metrics defined for state: ${this.currentState}`);
-    }
 
-    // Adjust failure rate based on load
     const adjustedFailureRate = Math.min(
       0.95,
       stateMetric.failureRate * this.loadFactor,
     );
-    const shouldFail = Math.random() < adjustedFailureRate;
+    const shouldFail = this.random() < adjustedFailureRate;
 
-    // Add some randomness to response delay (±50%)
     const delayVariation = 0.5;
-    const responseDelay =
-      stateMetric.responseDelay * (1 + (Math.random() - 0.5) * delayVariation);
+    const responseDelay = Math.round(
+      stateMetric.responseDelay * (1 + (this.random() - 0.5) * delayVariation),
+    );
 
     if (shouldFail) {
       this.statistics.failedRequests++;
 
-      // Select error type based on weights
       const errorTypes = stateMetric.errorTypes;
-      const totalWeight = errorTypes.reduce(
-        (sum, error) => sum + error.weight,
-        0,
-      );
-      let random = Math.random() * totalWeight;
-
+      const totalWeight = errorTypes.reduce((sum, e) => sum + e.weight, 0);
+      let r = this.random() * totalWeight;
       for (const errorType of errorTypes) {
-        random -= errorType.weight;
-        if (random <= 0) {
+        r -= errorType.weight;
+        if (r <= 0) {
           return {
             shouldFail: true,
-            responseDelay: Math.round(responseDelay),
+            responseDelay,
             errorDetails: {
               status: errorType.status,
               message: errorType.message,
@@ -424,14 +510,11 @@ export class MarkovFailureModel {
       this.statistics.successfulRequests++;
     }
 
-    return {
-      shouldFail: false,
-      responseDelay: Math.round(responseDelay),
-    };
+    return { shouldFail: false, responseDelay };
   }
 
   public setLoadFactor(load: number) {
-    this.loadFactor = Math.max(0.1, Math.min(3.0, load)); // Clamp between 0.1 and 3.0
+    this.loadFactor = Math.max(0.1, Math.min(3.0, load));
     console.log(
       `📊 [Markov Model] Load factor set to: ${this.loadFactor.toFixed(2)}`,
     );
@@ -443,7 +526,6 @@ export class MarkovFailureModel {
   }
 
   private updateCalculatedStatistics() {
-    // Calculate MTBF and MTTR
     const failureStates = [ServiceState.FAILING, ServiceState.CRITICAL];
     const healthyStates = [ServiceState.HEALTHY, ServiceState.RECOVERING];
 
@@ -452,9 +534,7 @@ export class MarkovFailureModel {
     let failureCount = 0;
     let recoveryCount = 0;
 
-    for (let i = 0; i < this.statistics.stateHistory.length; i++) {
-      const entry = this.statistics.stateHistory[i];
-
+    for (const entry of this.statistics.stateHistory) {
       if (failureStates.includes(entry.state)) {
         totalFailureTime += entry.duration;
         failureCount++;
@@ -469,15 +549,14 @@ export class MarkovFailureModel {
     this.statistics.mttr =
       recoveryCount > 0 ? totalFailureTime / recoveryCount : 0;
 
-    // Calculate state distribution
     this.statistics.stateDistribution.clear();
     for (const entry of this.statistics.stateHistory) {
-      const currentCount =
-        this.statistics.stateDistribution.get(entry.state) || 0;
-      this.statistics.stateDistribution.set(entry.state, currentCount + 1);
+      this.statistics.stateDistribution.set(
+        entry.state,
+        (this.statistics.stateDistribution.get(entry.state) || 0) + 1,
+      );
     }
 
-    // Calculate average response time (approximation)
     this.statistics.averageResponseTime =
       this.statistics.totalRequests > 0
         ? (this.statistics.successfulRequests * 200 +

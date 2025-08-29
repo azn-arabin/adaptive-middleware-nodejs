@@ -31,6 +31,6 @@ if [ "$NODE_ENV" = "development" ]; then
     npm run dev
 else
     echo "Starting in production mode..."
-    npm run build
-    npm run start
+    # In production the image is already built during docker build; directly start
+    exec npm start
 fi

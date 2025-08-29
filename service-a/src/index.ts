@@ -8,6 +8,9 @@ import {
   clearFailureWindow,
 } from "adaptive-middleware";
 
+// New: Prometheus client for metrics endpoint
+import client from "prom-client";
+
 startAdaptiveTuner();
 
 const app = express();
@@ -27,6 +30,43 @@ const demoMetrics = {
   performanceData: [] as any[],
 };
 
+// Prometheus metrics
+const collectDefaultMetrics = client.collectDefaultMetrics;
+collectDefaultMetrics();
+const promTotalRequests = new client.Counter({
+  name: "service_a_total_requests",
+  help: "Total requests sent by service-a demos",
+});
+const promSuccess = new client.Counter({
+  name: "service_a_success_count",
+  help: "Successful requests",
+});
+const promFailure = new client.Counter({
+  name: "service_a_failure_count",
+  help: "Failed requests",
+});
+const promFallback = new client.Counter({
+  name: "service_a_fallback_count",
+  help: "Fallback responses",
+});
+const promCircuit = new client.Counter({
+  name: "service_a_circuit_activations",
+  help: "Circuit breaker activations",
+});
+const promRetry = new client.Counter({
+  name: "service_a_retry_attempts",
+  help: "Retry attempts",
+});
+const promResponseTime = new client.Histogram({
+  name: "service_a_response_time_ms",
+  help: "Response times for service-a demo requests",
+  buckets: [50, 100, 200, 500, 1000, 2000, 5000],
+});
+
+function updatePromMetrics() {
+  // This function is idempotent; counters are only incremented when events occur.
+}
+
 function addPresentationLog(category: string, message: string, data?: any) {
   const logEntry = {
     timestamp: new Date().toISOString(),
@@ -37,21 +77,28 @@ function addPresentationLog(category: string, message: string, data?: any) {
     id: Date.now() + Math.random(),
   };
 
-  // Fixed metrics calculation - only count actual requests, not fallbacks
+  // Removed totalRequests increments here to avoid double-count.
   if (category === "SUCCESS") {
     demoMetrics.successfulRequests++;
-    demoMetrics.totalRequests++;
+    promSuccess.inc();
   }
   if (category === "FAILURE") {
     demoMetrics.failedRequests++;
-    demoMetrics.totalRequests++;
+    promFailure.inc();
   }
   if (category === "FALLBACK") {
     demoMetrics.fallbackResponses++;
+    promFallback.inc();
     // Don't double-count fallbacks as separate requests
   }
-  if (category === "CIRCUIT") demoMetrics.circuitBreakerActivations++;
-  if (category === "RETRY") demoMetrics.retryAttempts++;
+  if (category === "CIRCUIT") {
+    demoMetrics.circuitBreakerActivations++;
+    promCircuit.inc();
+  }
+  if (category === "RETRY") {
+    demoMetrics.retryAttempts++;
+    promRetry.inc();
+  }
 
   presentationLogs.unshift(logEntry);
   if (presentationLogs.length > MAX_LOGS) {
@@ -258,6 +305,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
 
   for (let i = 1; i <= requestCount; i++) {
     demoMetrics.totalRequests++;
+    promTotalRequests.inc();
     const startTime = Date.now();
 
     try {
@@ -275,6 +323,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
       });
 
       const duration = Date.now() - startTime;
+      promResponseTime.observe(duration);
       demoMetrics.stateTransitionsSeen.add(stateName);
 
       if (response.markovModel) {
@@ -314,7 +363,10 @@ async function performTestSequence(stateName: string, requestCount: number) {
       });
     } catch (error) {
       failureCount++;
+      demoMetrics.failedRequests++;
+      promFailure.inc();
       const duration = Date.now() - startTime;
+      promResponseTime.observe(duration);
       addPresentationLog(
         "FAILURE",
         `❌ Request ${i} failed in ${stateName} state`,
@@ -370,6 +422,9 @@ app.get("/demo/quick-showcase", async (req, res) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state }),
       });
+
+      demoMetrics.totalRequests++;
+      promTotalRequests.inc();
 
       const response = await faultTolerantFetch("http://service-b:5000/data", {
         fallbackData: { message: `Quick demo fallback for ${state}` },
@@ -487,7 +542,13 @@ app.get("/", (req, res) => {
 // Simple endpoint for basic testing
 app.get("/test", async (req, res) => {
   try {
+    demoMetrics.totalRequests++;
+    promTotalRequests.inc();
+    const start = Date.now();
     const response = await faultTolerantFetch("http://service-b:5000/data");
+    const duration = Date.now() - start;
+    promResponseTime.observe(duration);
+
     res.json({
       status: "SUCCESS",
       middleware: "Adaptive middleware working",
@@ -502,21 +563,14 @@ app.get("/test", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(
-    `🎓 [Service A] Academic Presentation Server running on port ${PORT}`,
-  );
-  console.log(
-    `📚 BUET MSc Project: Adaptive Middleware with Markov Chain Failure Model`,
-  );
-  console.log(`🎯 Demo Endpoints:`);
-  console.log(`   GET  / - Project overview and demo guide`);
-  console.log(`   GET  /demo/markov-academic - Comprehensive academic demo`);
-  console.log(`   GET  /demo/quick-showcase - Quick live demo`);
-  console.log(`   GET  /presentation/statistics - Demo metrics`);
-  console.log(`   POST /demo/reset - Reset for new presentation`);
-  console.log(`🔗 Access: http://localhost:${PORT}`);
+// Prometheus metrics endpoint for service-a
+app.get("/metrics", async (req, res) => {
+  try {
+    res.set("Content-Type", client.register.contentType);
+    res.end(await client.register.metrics());
+  } catch (err) {
+    res.status(500).end(err instanceof Error ? err.message : String(err));
+  }
 });
 
 // 🎓 ENHANCED ACADEMIC DEMO WITH BETTER STATISTICS
@@ -765,6 +819,8 @@ async function performEnhancedTestSequence(
   let fallbackCount = 0;
 
   for (let i = 1; i <= requestCount; i++) {
+    demoMetrics.totalRequests++;
+    promTotalRequests.inc();
     const startTime = Date.now();
 
     try {
@@ -783,6 +839,7 @@ async function performEnhancedTestSequence(
       });
 
       const duration = Date.now() - startTime;
+      promResponseTime.observe(duration);
       demoMetrics.stateTransitionsSeen.add(stateName);
 
       if (response.markovModel) {
@@ -826,7 +883,10 @@ async function performEnhancedTestSequence(
       });
     } catch (error) {
       actualFailureCount++;
+      demoMetrics.failedRequests++;
+      promFailure.inc();
       const duration = Date.now() - startTime;
+      promResponseTime.observe(duration);
       addPresentationLog("FAILURE", `❌ Request ${i} failed in ${stateName}`, {
         error: error instanceof Error ? error.message : String(error),
         responseTime: `${duration}ms`,
@@ -871,3 +931,24 @@ async function performEnhancedTestSequence(
   );
   return phaseResults;
 }
+
+// Start HTTP server so the service is reachable (was missing)
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 [Service A] Running on port ${PORT}`);
+});
+
+// 📊 PRESENTATION LOGGING ENDPOINT (allow external tools to send logs)
+app.post("/presentation/log", (req, res) => {
+  const { category, message, data } = req.body || {};
+  if (!category || !message) {
+    return res.status(400).json({ error: "category and message are required" });
+  }
+
+  try {
+    addPresentationLog(category, message, data);
+    res.json({ status: "OK", message: "Log recorded" });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});

@@ -1,11 +1,64 @@
 import express from "express";
 import { MarkovFailureModel, ServiceState } from "./markovFailureModel.js";
+// Prometheus client for service-b
+// @ts-ignore: allow missing type declarations in this environment
+import client from "prom-client";
 
 const app = express();
 app.use(express.json());
 
-// Initialize Markov Chain Failure Model
-const failureModel = new MarkovFailureModel();
+// Read configuration from environment for deterministic experiments
+const seedEnv = process.env.MARKOV_SEED;
+const minTransitionEnv = process.env.MARKOV_MIN_TRANSITION_MS;
+const maxTransitionEnv = process.env.MARKOV_MAX_TRANSITION_MS;
+
+const seed = seedEnv ? parseInt(seedEnv, 10) : undefined;
+const minTransition = minTransitionEnv
+  ? parseInt(minTransitionEnv, 10)
+  : undefined;
+const maxTransition = maxTransitionEnv
+  ? parseInt(maxTransitionEnv, 10)
+  : undefined;
+
+// Initialize Markov Chain Failure Model with optional deterministic options
+const failureModel = new MarkovFailureModel({
+  seed: seed,
+  minTransitionIntervalMs: minTransition,
+  maxTransitionIntervalMs: maxTransition,
+});
+
+// Prometheus metrics setup
+const collectDefaultMetrics = client.collectDefaultMetrics;
+collectDefaultMetrics();
+const promTotal = new client.Counter({
+  name: "service_b_total_requests",
+  help: "Total requests to service-b",
+});
+const promSuccess = new client.Counter({
+  name: "service_b_success_count",
+  help: "Successful responses from service-b",
+});
+const promFailure = new client.Counter({
+  name: "service_b_failure_count",
+  help: "Failed responses from service-b",
+});
+const promResponseTime = new client.Histogram({
+  name: "service_b_response_time_ms",
+  help: "Response time in ms for service-b",
+  buckets: [50, 100, 200, 500, 1000, 2000, 5000],
+});
+
+// New: Prometheus metrics for Markov transitions and current state
+const promTransition = new client.Counter({
+  name: "service_b_state_transitions_total",
+  help: "Total number of state transitions",
+  labelNames: ["transition"],
+});
+const promCurrentState = new client.Gauge({
+  name: "service_b_current_state",
+  help: "Current state indicator (1 = active)",
+  labelNames: ["state"],
+});
 
 // Service metrics for tracking
 let totalRequests = 0;
@@ -26,8 +79,69 @@ console.log(
   "📊 Available states: HEALTHY → DEGRADED → FAILING → CRITICAL ⟷ RECOVERING",
 );
 
+// Initialize metrics for the starting state
+promCurrentState.set({ state: failureModel.getCurrentState() }, 1);
+
+// Hook into model transitions to update Prometheus metrics
+if ((failureModel as any).onTransition) {
+  failureModel.onTransition((from, to) => {
+    try {
+      promTransition.inc({ transition: `${from}->${to}` }, 1);
+      // Set previous state label to 0 and new state to 1 for easier alerting
+      promCurrentState.set({ state: from }, 0);
+      promCurrentState.set({ state: to }, 1);
+      console.log(`📈 [Metrics] Transition recorded: ${from}->${to}`);
+
+      // Also send a structured presentation log to service-a so the centralized
+      // presentation logs capture Markov transitions for adaptation analysis.
+      (async () => {
+        try {
+          await fetch("http://service-a:3000/presentation/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category: "MARKOV",
+              message: `State transition ${from} -> ${to}`,
+              data: {
+                from,
+                to,
+                timestamp: Date.now(),
+                note: "Markov model state transition",
+              },
+            }),
+          });
+        } catch (e) {
+          // best-effort - do not block or crash on logging failures
+          // also attempt localhost fallback for non-docker local runs
+          try {
+            await fetch("http://localhost:3000/presentation/log", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                category: "MARKOV",
+                message: `State transition ${from} -> ${to}`,
+                data: {
+                  from,
+                  to,
+                  timestamp: Date.now(),
+                  note: "Markov model state transition (fallback localhost)",
+                },
+              }),
+            });
+          } catch (e2) {
+            // ignore
+          }
+        }
+      })();
+    } catch (e) {
+      // ignore metrics errors
+    }
+  });
+}
+
 app.get("/data", (req, res) => {
   totalRequests++;
+  promTotal.inc();
   const requestStart = Date.now();
 
   // Get failure decision from Markov model
@@ -60,6 +174,9 @@ app.get("/data", (req, res) => {
         `❌ [Service B] Request ${totalRequests} FAILED (${result.errorDetails.status}) - State: ${currentState}, Load: ${currentLoad.toFixed(2)}`,
       );
 
+      promFailure.inc();
+      promResponseTime.observe(responseTime);
+
       res.status(result.errorDetails.status).json({
         error: result.errorDetails.message,
         timestamp: new Date().toISOString(),
@@ -91,6 +208,9 @@ app.get("/data", (req, res) => {
         `✅ [Service B] Request ${totalRequests} SUCCESS - State: ${currentState}, Success Rate: ${successRate}%`,
       );
 
+      promSuccess.inc();
+      promResponseTime.observe(responseTime);
+
       res.json({
         data: "Hello from Service B with Markov Model",
         timestamp: new Date().toISOString(),
@@ -103,6 +223,16 @@ app.get("/data", (req, res) => {
       });
     }
   }, result.responseDelay);
+});
+
+// Prometheus metrics endpoint for service-b
+app.get("/metrics", async (req, res) => {
+  try {
+    res.set("Content-Type", client.register.contentType);
+    res.end(await client.register.metrics());
+  } catch (err) {
+    res.status(500).end(err instanceof Error ? err.message : String(err));
+  }
 });
 
 // Enhanced statistics endpoint for academic presentation
@@ -282,4 +412,5 @@ app.listen(PORT, () => {
   console.log(`   GET  /markov/configuration - Model configuration details`);
   console.log(`   POST /control/force-state - Force state transition`);
   console.log(`   POST /control/load-factor - Adjust load factor`);
+  console.log(`   GET  /metrics - Prometheus metrics endpoint`);
 });

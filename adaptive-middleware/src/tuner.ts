@@ -17,6 +17,9 @@ export function setLogCallback(
   logCallback = callback;
 }
 
+// allow tuner interval to be configured via env var for faster demos
+const tunerIntervalMs = Number(process.env.TUNER_INTERVAL_MS) || 5000;
+
 // Force adaptation for demo purposes
 export function forceAdaptation(
   scenario: "high_failure" | "recovery" | "reset",
@@ -44,6 +47,7 @@ export function forceAdaptation(
             retries: { from: maxRetries, to: newRetries },
           },
           reason: "Protecting system from cascading failures",
+          timestamp: Date.now(),
         },
       );
     }
@@ -65,6 +69,7 @@ export function forceAdaptation(
             retries: { from: maxRetries, to: newRetries },
           },
           reason: "Optimizing for improved service performance",
+          timestamp: Date.now(),
         },
       );
     }
@@ -86,6 +91,7 @@ export function forceAdaptation(
             retries: { from: maxRetries, to: newRetries },
           },
           reason: "Demo complete - resetting to baseline",
+          timestamp: Date.now(),
         },
       );
     }
@@ -99,12 +105,25 @@ export function forceAdaptation(
   });
 
   console.log(
-    `[TUNER] 🎯 FORCED ADAPTATION | Scenario: ${scenario} | Threshold: ${failureThreshold}→${newThreshold} | Cooldown: ${cooldown}→${newCooldown}ms | Retries: ${maxRetries}→${newRetries}`,
+    `${new Date().toISOString()} [TUNER] 🎯 FORCED ADAPTATION | Scenario: ${scenario} | Threshold: ${failureThreshold}→${newThreshold} | Cooldown: ${cooldown}→${newCooldown}ms | Retries: ${maxRetries}→${newRetries}`,
   );
 }
 
 export function startAdaptiveTuner() {
-  console.log("[TUNER] 🎯 Starting adaptive tuner...");
+  console.log(
+    `${new Date().toISOString()} [TUNER] 🎯 Starting adaptive tuner... (interval ${tunerIntervalMs}ms)`,
+  );
+
+  // Emit initial configuration for presentation/reporting
+  if (logCallback) {
+    logCallback("ADAPTATION", "DEMO_START", {
+      failureThreshold: failureThreshold,
+      cooldownMs: cooldown,
+      retryAttempts: maxRetries,
+      reason: "Tuner initialized",
+      timestamp: Date.now(),
+    });
+  }
 
   setInterval(() => {
     const window = getFailureWindow();
@@ -151,7 +170,9 @@ export function startAdaptiveTuner() {
         2,
       )} | Threshold: ${failureThreshold}→${newThreshold} | Cooldown: ${cooldown}→${newCooldown}ms | Retries: ${maxRetries}→${newRetries}`;
 
-      console.log(`[TUNER] 🎯 ADAPTED | ${adaptationLog}`);
+      console.log(
+        `${new Date().toISOString()} [TUNER] 🎯 ADAPTED | ${adaptationLog}`,
+      );
 
       // Send to presentation logs
       if (logCallback) {
@@ -168,6 +189,7 @@ export function startAdaptiveTuner() {
               : failureRate < 0.2
                 ? "Low failure rate - optimizing"
                 : "Moderate adjustment",
+          timestamp: Date.now(),
         });
       }
     } else {
@@ -175,7 +197,7 @@ export function startAdaptiveTuner() {
       if (Math.random() < 0.3) {
         // 30% chance
         console.log(
-          `[TUNER] 📊 STABLE | FailureRate: ${failureRate.toFixed(
+          `${new Date().toISOString()} [TUNER] 📊 STABLE | FailureRate: ${failureRate.toFixed(
             2,
           )} | Threshold: ${newThreshold} | Cooldown: ${newCooldown}ms | Retries: ${newRetries}`,
         );
@@ -190,9 +212,10 @@ export function startAdaptiveTuner() {
               cooldown: newCooldown,
               retries: newRetries,
             },
+            timestamp: Date.now(),
           });
         }
       }
     }
-  }, 5000); // Keep at 5s for demo responsiveness
+  }, tunerIntervalMs); // configurable interval
 }

@@ -2,15 +2,17 @@ services:
   adaptive-middleware:
     build:
       context: ./adaptive-middleware
-    volumes:
-      - ./adaptive-middleware/src:/app/src
-      - ./adaptive-middleware/dist:/app/dist
-    command: sh -c "npm install && npm run build && npm run dev"
+    # Use built image and run production start (the Dockerfile builds the package)
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    command: sh -c "npm run start"
     working_dir: /app
 
   service-a:
     build:
-      context: ./service-a
+      context: .
+      dockerfile: service-a/Dockerfile
     ports:
       - "3000:3000"
     depends_on:
@@ -18,24 +20,16 @@ services:
         condition: service_started
       service-b:
         condition: service_started
-    volumes:
-      - ./service-a/src:/app/src
-      - ./service-a/package.json:/app/package.json
-      - ./adaptive-middleware:/app/adaptive-middleware
+    # Run production image (built during docker-compose up --build)
     environment:
-      - NODE_ENV=development
-    tty: true
-    stdin_open: true
+      - NODE_ENV=production
+    restart: unless-stopped
 
   service-b:
     build:
       context: ./service-b
     ports:
       - "5000:5000"
-    volumes:
-      - ./service-b/src:/app/src
-      - ./service-b/package.json:/app/package.json
     environment:
-      - NODE_ENV=development
-    tty: true
-    stdin_open: true
+      - NODE_ENV=production
+    restart: unless-stopped
