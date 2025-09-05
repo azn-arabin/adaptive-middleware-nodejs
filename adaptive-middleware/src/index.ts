@@ -9,6 +9,11 @@ import {
 import { getFallbackResponse } from "./fallback.js";
 import { FaultTolerantOptions } from "./types.js";
 import * as config from "./config.js";
+import {
+  startAdaptiveTuner,
+  setLogCallback,
+  forceAdaptation,
+} from "./tuner.js";
 
 // Callback for sending logs to presentation system
 let logCallback:
@@ -16,7 +21,7 @@ let logCallback:
   | null = null;
 
 export function setMiddlewareLogCallback(
-  callback: (category: string, message: string, data?: any) => void,
+  callback: (category: string, message: string, data?: any) => void
 ) {
   logCallback = callback;
   // Set callbacks for all modules
@@ -26,7 +31,7 @@ export function setMiddlewareLogCallback(
 
 export async function faultTolerantFetch(
   url: string,
-  options: FaultTolerantOptions = {},
+  options: FaultTolerantOptions = {}
 ): Promise<any> {
   const {
     retries = config.maxRetries, // Use dynamic retry count from config
@@ -45,7 +50,7 @@ export async function faultTolerantFetch(
           url,
           reason: "CIRCUIT_OPEN",
           fallbackData,
-        },
+        }
       );
     }
 
@@ -56,7 +61,7 @@ export async function faultTolerantFetch(
     console.log(`[Fault Tolerant] Calling ${url} with ${retries} max retries`);
     const result: any = await retryRequest(
       () => axios.get(url, { timeout }),
-      retries,
+      retries
     );
 
     console.log(`[Circuit Closed] Successful call to: ${url}`);
@@ -85,7 +90,7 @@ export async function faultTolerantFetch(
           reason: "RETRIES_EXHAUSTED",
           fallbackData,
           error: err instanceof Error ? err.message : String(err),
-        },
+        }
       );
     }
 

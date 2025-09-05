@@ -1,14 +1,4 @@
 services:
-  adaptive-middleware:
-    build:
-      context: ./adaptive-middleware
-    # Use built image and run production start (the Dockerfile builds the package)
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-    command: sh -c "npm run start"
-    working_dir: /app
-
   service-a:
     build:
       context: .
@@ -16,8 +6,6 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      adaptive-middleware:
-        condition: service_started
       service-b:
         condition: service_started
     # Run production image (built during docker-compose up --build)

@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 
 const scenarios = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "scenarios.json"), "utf8"),
+  fs.readFileSync(path.join(__dirname, "scenarios.json"), "utf8")
 );
 // Allow quick CLI overrides for smoke testing without editing scenarios.json
 // Usage: node experiments/runner.js --smoke  (runs 120s)
@@ -35,7 +35,7 @@ if (cliArgs.durationSec) {
   scenarios.requestIntervalMs = scenarios.requestIntervalMs || 1500;
   scenarios.runsPerCombination = 1;
   console.log(
-    `Override: runDurationSec=${scenarios.runDurationSec} (from CLI)`,
+    `Override: runDurationSec=${scenarios.runDurationSec} (from CLI)`
   );
 }
 
@@ -69,33 +69,92 @@ async function runWorkload(
   serviceAUrl,
   endpoint,
   durationSec,
-  intervalMs,
+  intervalMs
 ) {
   const reqs = [];
   const start = Date.now();
   const end = start + durationSec * 1000;
   let id = 1;
+  let currentLoadFactor = null;
+  let currentTestPhase = "workload";
+
+  // Get initial state info
+  try {
+    const serviceB = await fetch("http://localhost:5000/statistics");
+    const serviceBData = await serviceB.json().catch(() => null);
+    if (serviceBData?.serviceMetrics?.loadFactor) {
+      currentLoadFactor = serviceBData.serviceMetrics.loadFactor;
+    }
+  } catch (e) {
+    // ignore initial state fetch errors
+  }
 
   while (Date.now() < end) {
     const t0 = Date.now();
+    const relativeTime = (Date.now() - start) / 1000;
+
+    // Determine test phase based on time
+    if (relativeTime < durationSec * 0.2) {
+      currentTestPhase = "initial";
+    } else if (relativeTime < durationSec * 0.5) {
+      currentTestPhase = "ramp-up";
+    } else if (relativeTime < durationSec * 0.8) {
+      currentTestPhase = "steady-state";
+    } else {
+      currentTestPhase = "wind-down";
+    }
+
     try {
       const raw = await fetch(serviceAUrl + endpoint);
-      const r = await raw.json().catch(() => null);
+      const r = await raw.json().catch(() => ({
+        // Synthesize a fallback response on JSON parsing failure
+        ok: false,
+        usedFallback: true,
+        error: "json_parse_error",
+        status: "FALLBACK",
+      }));
 
       // Normalize response to capture key fields for plotting
       const serviceState =
-        r?.serviceState ??
-        r?.serviceResponse?.serviceState ??
-        r?.serviceResponse?.serviceState ??
-        null;
+        r?.serviceState ?? r?.serviceResponse?.serviceState ?? null;
       const markovModelPresent = !!(
         r?.markovModel ||
         r?.serviceResponse?.markovModel ||
         (r?.serviceResponse && r.serviceResponse.markovModel)
       );
-      const usedFallback = r ? !markovModelPresent : null;
-      const loadFactor =
-        r?.loadFactor ?? r?.serviceResponse?.loadFactor ?? null;
+      const usedFallback = r ? !markovModelPresent : true;
+
+      // Enhanced load factor extraction with fallback preservation
+      let loadFactor = r?.loadFactor ?? r?.serviceResponse?.loadFactor ?? null;
+
+      // For fallback responses, preserve the current load factor or get from fallback data
+      if (usedFallback && !loadFactor) {
+        loadFactor =
+          r?.serviceResponse?.loadFactor ?? r?.loadFactor ?? currentLoadFactor;
+      }
+
+      // Try to get service state from Service B directly for fallback cases
+      let finalServiceState = serviceState;
+      if (usedFallback && !serviceState) {
+        try {
+          const serviceBStatus = await fetch(
+            "http://localhost:5000/statistics"
+          );
+          const serviceBData = await serviceBStatus.json();
+          if (serviceBData?.markovChainMetrics?.currentState) {
+            finalServiceState = serviceBData.markovChainMetrics.currentState;
+          }
+          if (serviceBData?.serviceMetrics?.loadFactor) {
+            currentLoadFactor = serviceBData.serviceMetrics.loadFactor;
+            if (!loadFactor) {
+              loadFactor = currentLoadFactor;
+            }
+          }
+        } catch (e) {
+          // fallback to previous known state
+          finalServiceState = finalServiceState || "UNKNOWN";
+        }
+      }
 
       reqs.push({
         id: id++,
@@ -103,9 +162,11 @@ async function runWorkload(
         durationMs: Date.now() - t0,
         ok: r !== null,
         response: r,
-        serviceState: serviceState,
+        serviceState: finalServiceState,
         usedFallback: usedFallback,
         loadFactor: loadFactor,
+        testPhase: currentTestPhase,
+        relativeTimeSeconds: relativeTime.toFixed(3),
       });
     } catch (e) {
       reqs.push({
@@ -114,6 +175,11 @@ async function runWorkload(
         durationMs: Date.now() - t0,
         ok: false,
         error: e.message,
+        serviceState: "ERROR",
+        usedFallback: true,
+        loadFactor: currentLoadFactor,
+        testPhase: currentTestPhase,
+        relativeTimeSeconds: relativeTime.toFixed(3),
       });
     }
 
@@ -123,7 +189,7 @@ async function runWorkload(
         fs.writeFileSync(
           path.join(runPath, "request-timeline.json"),
           JSON.stringify(reqs, null, 2),
-          "utf8",
+          "utf8"
         );
       } catch (e) {
         // ignore write errors
@@ -141,7 +207,7 @@ async function runWorkload(
     fs.writeFileSync(
       path.join(runPath, "request-timeline.json"),
       JSON.stringify(reqs, null, 2),
-      "utf8",
+      "utf8"
     );
   } catch (e) {}
 
@@ -186,20 +252,20 @@ async function runWorkload(
         console.log(`Waiting for Service B health at ${serviceBHealth}`);
         const okB = await waitForUrl(
           serviceBHealth,
-          scenarios.waitForServicesTimeoutSec,
+          scenarios.waitForServicesTimeoutSec
         );
         console.log(`Service B ready: ${okB}`);
 
         console.log(`Waiting for Service A at ${serviceAUrl}`);
         const okA = await waitForUrl(
           serviceAUrl,
-          scenarios.waitForServicesTimeoutSec,
+          scenarios.waitForServicesTimeoutSec
         );
         console.log(`Service A ready: ${okA}`);
 
         if (!okA || !okB) {
           console.error(
-            "One or more services did not become ready in time. Collecting logs and exiting.",
+            "One or more services did not become ready in time. Collecting logs and exiting."
           );
           try {
             // Capture full compose logs programmatically to avoid shell redirection issues on Windows (paths with spaces)
@@ -209,19 +275,19 @@ async function runWorkload(
             fs.writeFileSync(
               path.join(runPath, "compose-logs.txt"),
               allLogs,
-              "utf8",
+              "utf8"
             );
 
             // Also capture per-service logs to ease debugging
             try {
               const logsA = execSync(
                 "docker-compose logs service-a --no-color",
-                { encoding: "utf8" },
+                { encoding: "utf8" }
               );
               fs.writeFileSync(
                 path.join(runPath, "service-a-logs.txt"),
                 logsA,
-                "utf8",
+                "utf8"
               );
             } catch (e) {
               // ignore per-service failures
@@ -229,29 +295,29 @@ async function runWorkload(
             try {
               const logsB = execSync(
                 "docker-compose logs service-b --no-color",
-                { encoding: "utf8" },
+                { encoding: "utf8" }
               );
               fs.writeFileSync(
                 path.join(runPath, "service-b-logs.txt"),
                 logsB,
-                "utf8",
+                "utf8"
               );
             } catch (e) {}
             try {
               const logsM = execSync(
                 "docker-compose logs adaptive-middleware --no-color",
-                { encoding: "utf8" },
+                { encoding: "utf8" }
               );
               fs.writeFileSync(
                 path.join(runPath, "adaptive-middleware-logs.txt"),
                 logsM,
-                "utf8",
+                "utf8"
               );
             } catch (e) {}
           } catch (e) {
             console.warn(
               "Failed to capture docker-compose logs programmatically:",
-              e.message,
+              e.message
             );
           }
 
@@ -283,7 +349,7 @@ async function runWorkload(
           demoResult = await r.json().catch(() => null);
           fs.writeFileSync(
             path.join(runPath, "demo-response.json"),
-            JSON.stringify(demoResult, null, 2),
+            JSON.stringify(demoResult, null, 2)
           );
           console.log("Saved demo response");
         } catch (e) {
@@ -293,7 +359,7 @@ async function runWorkload(
         // If runDurationSec configured, run workload against service-a endpoint
         if (scenarios.runDurationSec && scenarios.runDurationSec > 0) {
           console.log(
-            `Running workload for ${scenarios.runDurationSec} seconds (interval ${scenarios.requestIntervalMs} ms)`,
+            `Running workload for ${scenarios.runDurationSec} seconds (interval ${scenarios.requestIntervalMs} ms)`
           );
           try {
             const workloadResult = await runWorkload(
@@ -301,12 +367,12 @@ async function runWorkload(
               scenarios.serviceAUrl,
               scenarios.workloadEndpoint || "/test",
               scenarios.runDurationSec,
-              scenarios.requestIntervalMs || 1000,
+              scenarios.requestIntervalMs || 1000
             );
             fs.writeFileSync(
               path.join(runPath, "workload-summary.json"),
               JSON.stringify(workloadResult, null, 2),
-              "utf8",
+              "utf8"
             );
             console.log("Workload completed", workloadResult);
           } catch (e) {
@@ -322,7 +388,7 @@ async function runWorkload(
           if (metricsA)
             fs.writeFileSync(
               path.join(runPath, "service-a-metrics.prom"),
-              metricsA,
+              metricsA
             );
           const metricsB = await fetch(`${scenarios.serviceBUrl}/metrics`)
             .then((r) => r.text())
@@ -330,18 +396,18 @@ async function runWorkload(
           if (metricsB)
             fs.writeFileSync(
               path.join(runPath, "service-b-metrics.prom"),
-              metricsB,
+              metricsB
             );
 
           const pres = await fetch(
-            `${scenarios.serviceAUrl}/presentation/statistics`,
+            `${scenarios.serviceAUrl}/presentation/statistics`
           )
             .then((r) => r.json())
             .catch(() => null);
           if (pres)
             fs.writeFileSync(
               path.join(runPath, "service-a-presentation-statistics.json"),
-              JSON.stringify(pres, null, 2),
+              JSON.stringify(pres, null, 2)
             );
 
           const statB = await fetch(`${scenarios.serviceBUrl}/statistics`)
@@ -350,7 +416,7 @@ async function runWorkload(
           if (statB)
             fs.writeFileSync(
               path.join(runPath, "service-b-statistics.json"),
-              JSON.stringify(statB, null, 2),
+              JSON.stringify(statB, null, 2)
             );
 
           console.log("Collected metrics and statistics");
@@ -358,25 +424,92 @@ async function runWorkload(
           console.warn("Error collecting metrics:", e.message);
         }
 
-        // Archive docker-compose logs
+        // Archive docker-compose logs (optimized for large outputs)
         try {
-          const allLogs = execSync("docker-compose logs --no-color", {
-            encoding: "utf8",
-          });
+          console.log("Capturing docker-compose logs...");
+          // Use --tail to limit log size for long runs and increase buffer
+          const maxLogLines = Math.min(
+            5000,
+            Math.floor(scenarios.runDurationSec / 3)
+          );
+          const allLogs = execSync(
+            `docker-compose logs --no-color --tail=${maxLogLines}`,
+            {
+              encoding: "utf8",
+              maxBuffer: 1024 * 1024 * 50, // 50MB buffer
+              timeout: 60000, // 60 second timeout
+            }
+          );
           fs.writeFileSync(
             path.join(runPath, "compose-logs.txt"),
             allLogs,
-            "utf8",
+            "utf8"
           );
+          console.log("Docker-compose logs captured successfully");
         } catch (e) {
           console.warn("Failed to capture compose logs:", e.message);
+          // Try individual service logs as fallback with smaller buffers
+          try {
+            const serviceALogs = execSync(
+              "docker-compose logs service-a --no-color --tail=1000",
+              {
+                encoding: "utf8",
+                maxBuffer: 1024 * 1024 * 10,
+                timeout: 20000,
+              }
+            );
+            fs.writeFileSync(
+              path.join(runPath, "service-a-logs.txt"),
+              serviceALogs,
+              "utf8"
+            );
+            console.log("Service-A logs captured as fallback");
+          } catch (e2) {
+            console.warn("Could not capture service-a logs:", e2.message);
+          }
+          try {
+            const serviceBLogs = execSync(
+              "docker-compose logs service-b --no-color --tail=1000",
+              {
+                encoding: "utf8",
+                maxBuffer: 1024 * 1024 * 10,
+                timeout: 20000,
+              }
+            );
+            fs.writeFileSync(
+              path.join(runPath, "service-b-logs.txt"),
+              serviceBLogs,
+              "utf8"
+            );
+            console.log("Service-B logs captured as fallback");
+          } catch (e2) {
+            console.warn("Could not capture service-b logs:", e2.message);
+          }
+          try {
+            const middlewareLogs = execSync(
+              "docker-compose logs adaptive-middleware --no-color --tail=1000",
+              {
+                encoding: "utf8",
+                maxBuffer: 1024 * 1024 * 10,
+                timeout: 20000,
+              }
+            );
+            fs.writeFileSync(
+              path.join(runPath, "adaptive-middleware-logs.txt"),
+              middlewareLogs,
+              "utf8"
+            );
+            console.log("Middleware logs captured as fallback");
+          } catch (e2) {
+            console.warn("Could not capture middleware logs:", e2.message);
+          }
         }
 
         // Generate Excel report for this run (if generator exists)
         try {
           const generator = path.join(
             process.cwd(),
-            "generate-excel-report.js",
+            "generate-excel-report.js"
           );
           if (fs.existsSync(generator)) {
             console.log("Generating Excel report for run...");
@@ -395,7 +528,7 @@ async function runWorkload(
         }
 
         console.log(
-          `=== Completed run ${runId} (results saved to ${runPath}) ===\n`,
+          `=== Completed run ${runId} (results saved to ${runPath}) ===\n`
         );
 
         // small pause between runs

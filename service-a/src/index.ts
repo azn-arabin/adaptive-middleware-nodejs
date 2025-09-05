@@ -1,16 +1,21 @@
 import express from "express";
 import {
   faultTolerantFetch,
-  startAdaptiveTuner,
   setMiddlewareLogCallback,
   setLogCallback,
   forceAdaptation,
   clearFailureWindow,
+  startAdaptiveTuner,
 } from "adaptive-middleware";
 
 // New: Prometheus client for metrics endpoint
 import client from "prom-client";
 
+// Note: Tuner is now started in the adaptive-middleware service
+// startAdaptiveTuner(); // Removed - runs in adaptive-middleware service
+
+// Start the adaptive tuner
+console.log("Starting Adaptive Tuner in Service A...");
 startAdaptiveTuner();
 
 const app = express();
@@ -121,7 +126,7 @@ function addPresentationLog(category: string, message: string, data?: any) {
 
   console.log(
     `${emoji} [${category}] ${message}`,
-    data ? JSON.stringify(data, null, 2) : "",
+    data ? JSON.stringify(data, null, 2) : ""
   );
 }
 
@@ -132,7 +137,7 @@ setLogCallback(addPresentationLog);
 app.get("/demo/markov-academic", async (req, res) => {
   addPresentationLog(
     "ACADEMIC",
-    "🎬 Starting ACADEMIC MARKOV CHAIN DEMONSTRATION for BUET MSc Presentation",
+    "🎬 Starting ACADEMIC MARKOV CHAIN DEMONSTRATION for BUET MSc Presentation"
   );
 
   const demoResults = {
@@ -146,7 +151,7 @@ app.get("/demo/markov-academic", async (req, res) => {
     // PHASE 1: Demonstrate Healthy State (Baseline)
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 1: Demonstrating HEALTHY state behavior",
+      "📊 PHASE 1: Demonstrating HEALTHY state behavior"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -161,7 +166,7 @@ app.get("/demo/markov-academic", async (req, res) => {
     // PHASE 2: Demonstrate Degraded State (Moderate Failures)
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 2: Demonstrating DEGRADED state - middleware retries",
+      "📊 PHASE 2: Demonstrating DEGRADED state - middleware retries"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -176,7 +181,7 @@ app.get("/demo/markov-academic", async (req, res) => {
     // PHASE 3: Demonstrate Failing State (High Failures)
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 3: Demonstrating FAILING state - circuit breaker activation",
+      "📊 PHASE 3: Demonstrating FAILING state - circuit breaker activation"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -191,7 +196,7 @@ app.get("/demo/markov-academic", async (req, res) => {
     // PHASE 4: Demonstrate Critical State (Circuit Breaker)
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 4: Demonstrating CRITICAL state - fallback responses",
+      "📊 PHASE 4: Demonstrating CRITICAL state - fallback responses"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -206,7 +211,7 @@ app.get("/demo/markov-academic", async (req, res) => {
     // PHASE 5: Demonstrate Recovery State (Adaptation)
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 5: Demonstrating RECOVERING state - adaptive behavior",
+      "📊 PHASE 5: Demonstrating RECOVERING state - adaptive behavior"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -217,12 +222,23 @@ app.get("/demo/markov-academic", async (req, res) => {
     const recoveringResults = await performTestSequence("RECOVERING", 5);
     demoResults.phases.push(recoveringResults);
 
+    // FORCE SOME ADAPTATION EVENTS FOR TESTING
+    addPresentationLog(
+      "ADAPTATION",
+      "🎯 Forcing adaptation events for testing"
+    );
+    forceAdaptation("high_failure");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    forceAdaptation("recovery");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    forceAdaptation("reset");
+
     // FINAL ANALYSIS: Collect comprehensive statistics
     const markovStats = await fetch("http://service-b:5000/statistics").then(
-      (r) => r.json(),
+      (r) => r.json()
     );
     const markovConfig = await fetch(
-      "http://service-b:5000/markov/configuration",
+      "http://service-b:5000/markov/configuration"
     ).then((r) => r.json());
 
     demoResults.markovStatistics = markovStats;
@@ -259,7 +275,7 @@ app.get("/demo/markov-academic", async (req, res) => {
         phasesCompleted: demoResults.phases.length,
         totalRequests: demoMetrics.totalRequests,
         demonstratedStates: Array.from(demoMetrics.stateTransitionsSeen),
-      },
+      }
     );
 
     res.json({
@@ -289,7 +305,7 @@ app.get("/demo/markov-academic", async (req, res) => {
 async function performTestSequence(stateName: string, requestCount: number) {
   addPresentationLog(
     "MARKOV",
-    `🧪 Testing ${stateName} state with ${requestCount} requests`,
+    `🧪 Testing ${stateName} state with ${requestCount} requests`
   );
 
   const phaseResults = {
@@ -311,7 +327,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
     try {
       addPresentationLog(
         "MIDDLEWARE",
-        `📤 Request ${i}/${requestCount} to Service B (${stateName} state)`,
+        `📤 Request ${i}/${requestCount} to Service B (${stateName} state)`
       );
 
       const response = await faultTolerantFetch("http://service-b:5000/data", {
@@ -334,7 +350,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
           {
             responseTime: `${duration}ms`,
             serviceState: response.serviceState,
-          },
+          }
         );
       } else {
         fallbackCount++;
@@ -343,7 +359,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
           `🚨 Request ${i} used fallback in ${stateName} state`,
           {
             responseTime: `${duration}ms`,
-          },
+          }
         );
       }
 
@@ -373,7 +389,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
         {
           error: error instanceof Error ? error.message : String(error),
           responseTime: `${duration}ms`,
-        },
+        }
       );
 
       phaseResults.responses.push({
@@ -399,7 +415,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
   addPresentationLog(
     "MARKOV",
     `📈 ${stateName} phase completed`,
-    phaseResults.summary,
+    phaseResults.summary
   );
   return phaseResults;
 }
@@ -408,7 +424,7 @@ async function performTestSequence(stateName: string, requestCount: number) {
 app.get("/demo/quick-showcase", async (req, res) => {
   addPresentationLog(
     "ACADEMIC",
-    "⚡ Starting QUICK SHOWCASE for live demonstration",
+    "⚡ Starting QUICK SHOWCASE for live demonstration"
   );
 
   try {
@@ -494,7 +510,7 @@ app.post("/demo/reset", async (req, res) => {
 
   addPresentationLog(
     "ACADEMIC",
-    "🔄 Demo state reset - ready for new presentation",
+    "🔄 Demo state reset - ready for new presentation"
   );
 
   res.json({
@@ -577,7 +593,7 @@ app.get("/metrics", async (req, res) => {
 app.get("/demo/markov-enhanced", async (req, res) => {
   addPresentationLog(
     "ACADEMIC",
-    "🎬 Starting ENHANCED MARKOV DEMONSTRATION with Load Factor Analysis",
+    "🎬 Starting ENHANCED MARKOV DEMONSTRATION with Load Factor Analysis"
   );
 
   // Reset metrics for clean demo
@@ -606,7 +622,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     // PHASE 1: HEALTHY with Normal Load
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 1: HEALTHY state with normal load (1.0)",
+      "📊 PHASE 1: HEALTHY state with normal load (1.0)"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -626,7 +642,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     // PHASE 2: DEGRADED with High Load
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 2: DEGRADED state with high load (2.0) - showing load correlation",
+      "📊 PHASE 2: DEGRADED state with high load (2.0) - showing load correlation"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -642,7 +658,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     const degradedResults = await performEnhancedTestSequence(
       "DEGRADED",
       6,
-      2.0,
+      2.0
     );
     demoResults.phases.push(degradedResults);
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -650,7 +666,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     // PHASE 3: FAILING - Let circuit breaker activate
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 3: FAILING state - circuit breaker activation",
+      "📊 PHASE 3: FAILING state - circuit breaker activation"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -665,7 +681,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     // PHASE 4: CRITICAL - All fallbacks
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 4: CRITICAL state - fallback protection",
+      "📊 PHASE 4: CRITICAL state - fallback protection"
     );
     await fetch("http://service-b:5000/control/force-state", {
       method: "POST",
@@ -676,7 +692,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     const criticalResults = await performEnhancedTestSequence(
       "CRITICAL",
       3,
-      2.0,
+      2.0
     );
     demoResults.phases.push(criticalResults);
     await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -684,7 +700,7 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     // PHASE 5: RECOVERING with Low Load
     addPresentationLog(
       "MARKOV",
-      "📊 PHASE 5: RECOVERING with low load (0.5) - recovery assistance",
+      "📊 PHASE 5: RECOVERING with low load (0.5) - recovery assistance"
     );
 
     // Reset circuit breaker to allow recovery testing
@@ -704,13 +720,24 @@ app.get("/demo/markov-enhanced", async (req, res) => {
     const recoveringResults = await performEnhancedTestSequence(
       "RECOVERING",
       4,
-      0.5,
+      0.5
     );
     demoResults.phases.push(recoveringResults);
 
+    // FORCE SOME ADAPTATION EVENTS FOR TESTING
+    addPresentationLog(
+      "ADAPTATION",
+      "🎯 Forcing adaptation events for testing"
+    );
+    forceAdaptation("high_failure");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    forceAdaptation("recovery");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    forceAdaptation("reset");
+
     // Collect final statistics
     const markovStats = await fetch("http://service-b:5000/statistics").then(
-      (r) => r.json(),
+      (r) => r.json()
     );
 
     demoResults.markovStatistics = markovStats;
@@ -798,11 +825,11 @@ app.get("/demo/markov-enhanced", async (req, res) => {
 async function performEnhancedTestSequence(
   stateName: string,
   requestCount: number,
-  loadFactor: number,
+  loadFactor: number
 ) {
   addPresentationLog(
     "MARKOV",
-    `🧪 Testing ${stateName} state with ${requestCount} requests (load: ${loadFactor})`,
+    `🧪 Testing ${stateName} state with ${requestCount} requests (load: ${loadFactor})`
   );
 
   const phaseResults = {
@@ -826,7 +853,7 @@ async function performEnhancedTestSequence(
     try {
       addPresentationLog(
         "MIDDLEWARE",
-        `📤 Request ${i}/${requestCount} to Service B (${stateName}, load: ${loadFactor})`,
+        `📤 Request ${i}/${requestCount} to Service B (${stateName}, load: ${loadFactor})`
       );
 
       const response = await faultTolerantFetch("http://service-b:5000/data", {
@@ -851,7 +878,7 @@ async function performEnhancedTestSequence(
             responseTime: `${duration}ms`,
             serviceState: response.serviceState,
             loadFactor: response.loadFactor,
-          },
+          }
         );
       } else {
         fallbackCount++;
@@ -861,7 +888,7 @@ async function performEnhancedTestSequence(
           {
             responseTime: `${duration}ms`,
             reason: "Circuit breaker or service failure",
-          },
+          }
         );
       }
 
@@ -918,7 +945,7 @@ async function performEnhancedTestSequence(
         ? (
             phaseResults.responses.reduce(
               (sum: number, r: any) => sum + r.duration,
-              0,
+              0
             ) / phaseResults.responses.length
           ).toFixed(0) + "ms"
         : "0ms",
@@ -927,7 +954,7 @@ async function performEnhancedTestSequence(
   addPresentationLog(
     "MARKOV",
     `📈 ${stateName} phase completed`,
-    phaseResults.summary,
+    phaseResults.summary
   );
   return phaseResults;
 }

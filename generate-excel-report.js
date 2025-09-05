@@ -30,28 +30,42 @@ function parseAdaptationEventsFromLogs(logText, runStartTs) {
   if (!logText) return [];
   const lines = logText.split(/\r?\n/);
   const events = [];
-  const tunerRegex = /\[TUNER\].*ADAPTED\s*\|\s*(.*)/i;
-  // Also capture generic ADAPTATION lines
-  const adaptRegex = /ADAPTATION|ADAPTED|\[TUNER\]/i;
+
+  // Updated regex patterns to match actual log formats
+  const tunerRegex = /\[TUNER\].*ADAPTED?\s*\|\s*(.*)/i;
+  const forcedRegex = /\[TUNER\].*FORCED ADAPTATION\s*\|\s*(.*)/i;
+  const adaptationRegex = /🎯 \[ADAPTATION\]/i;
 
   for (const l of lines) {
-    if (!adaptRegex.test(l)) continue;
-    const match = l.match(tunerRegex);
+    let match = null;
     let payload = null;
-    if (match && match[1]) payload = match[1].trim();
 
-    // Try to extract timestamp at line start like 2025-08-29T...
+    // Try different regex patterns
+    if (tunerRegex.test(l)) {
+      match = l.match(tunerRegex);
+      if (match && match[1]) payload = match[1].trim();
+    } else if (forcedRegex.test(l)) {
+      match = l.match(forcedRegex);
+      if (match && match[1]) payload = match[1].trim();
+    } else if (adaptationRegex.test(l)) {
+      // Look for the next line or extract from current line
+      const adaptMatch = l.match(/🎯 \[ADAPTATION\]\s*(.*)/i);
+      if (adaptMatch && adaptMatch[1]) payload = adaptMatch[1].trim();
+    }
+
+    if (!payload) continue;
+
+    // Try to extract timestamp from the line
     const timeMatch = l.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)/);
     let ts = null;
-    if (timeMatch) ts = Date.parse(timeMatch[1]);
-
-    // fallback: look for epoch-ish numbers in the line
-    if (!ts) {
+    if (timeMatch) {
+      ts = Date.parse(timeMatch[1]);
+    } else {
+      // Look for epoch timestamp in the line
       const epochMatch = l.match(/(17\d{11,13})/);
       if (epochMatch) ts = Number(epochMatch[1]);
     }
 
-    // If we found payload try parse key-value pairs separated by | or ,
     const evt = {
       rawLine: l,
       timestamp: ts || runStartTs || null,
@@ -59,25 +73,37 @@ function parseAdaptationEventsFromLogs(logText, runStartTs) {
     };
 
     if (payload) {
-      // payload example: "FailureRate: 0.12 | Threshold: 0.15→0.2 | Cooldown: 15000→18000ms | Retries: 3→2"
+      // Parse key-value pairs from payload
       const parts = payload.split("|").map((p) => p.trim());
       for (const p of parts) {
         const kv = p.split(":");
         if (kv.length < 2) continue;
         const key = kv[0].trim();
         const val = kv.slice(1).join(":").trim();
-        // normalize keys
+
+        // Normalize keys and extract final values (after → if present)
         const k = key
           .toLowerCase()
           .replace(/\s+/g, "_")
           .replace(/[^a-z0-9_]/g, "");
-        evt[k] = val;
+        let finalVal = val;
+
+        // Extract the final value from ranges like "0.5→0.5" or "10000→10000ms"
+        if (val.includes("→")) {
+          const parts = val.split("→");
+          finalVal = parts[parts.length - 1].trim();
+          // Remove units like "ms" from the end
+          finalVal = finalVal.replace(/ms$/, "").replace(/s$/, "");
+        }
+
+        evt[k] = finalVal;
       }
     }
 
     events.push(evt);
   }
-  // sort by timestamp
+
+  // Sort by timestamp
   events.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   return events;
 }
@@ -91,18 +117,18 @@ async function generateExcelReportForRun(runPath) {
 
   // Try to read known artifacts
   const serviceAPres = safeReadJSON(
-    path.join(runPath, "service-a-presentation-statistics.json"),
+    path.join(runPath, "service-a-presentation-statistics.json")
   );
   const serviceAmetrics = fs.existsSync(
-    path.join(runPath, "service-a-metrics.prom"),
+    path.join(runPath, "service-a-metrics.prom")
   )
     ? fs.readFileSync(path.join(runPath, "service-a-metrics.prom"), "utf8")
     : null;
   const serviceBstat = safeReadJSON(
-    path.join(runPath, "service-b-statistics.json"),
+    path.join(runPath, "service-b-statistics.json")
   );
   const serviceBmetrics = fs.existsSync(
-    path.join(runPath, "service-b-metrics.prom"),
+    path.join(runPath, "service-b-metrics.prom")
   )
     ? fs.readFileSync(path.join(runPath, "service-b-metrics.prom"), "utf8")
     : null;
@@ -110,7 +136,7 @@ async function generateExcelReportForRun(runPath) {
 
   // read request timeline if present
   const requestTimeline = safeReadJSON(
-    path.join(runPath, "request-timeline.json"),
+    path.join(runPath, "request-timeline.json")
   );
 
   // read compose logs to extract tuner/adaptation events
@@ -216,7 +242,7 @@ async function generateExcelReportForRun(runPath) {
         if (ph.loadFactor !== undefined)
           phaseByLoad.set(
             String(ph.loadFactor),
-            ph.stateName || ph.stateName || ph.stateName || ph.stateName,
+            ph.stateName || ph.stateName || ph.stateName || ph.stateName
           );
         if (ph.stateName) phaseByState.set(ph.stateName, ph.stateName);
       }
@@ -232,31 +258,71 @@ async function generateExcelReportForRun(runPath) {
         entry.usedFallback === true
           ? "YES"
           : entry.usedFallback === false
-            ? "NO"
-            : entry.response?.usedFallback
-              ? "YES"
-              : "NO";
+          ? "NO"
+          : entry.response?.usedFallback
+          ? "YES"
+          : "NO";
       let loadFactor =
         entry.loadFactor ??
         entry.response?.serviceResponse?.loadFactor ??
         entry.response?.loadFactor ??
         "";
+
+      // Additional fallback for load factor when usedFallback is true
+      if (!loadFactor && usedFallback === "YES") {
+        // Try to get load factor from the response data or use a default
+        loadFactor =
+          entry.response?.loadFactor ??
+          entry.response?.serviceResponse?.loadFactor ??
+          "N/A";
+      }
+
       if (typeof loadFactor === "number") loadFactor = String(loadFactor);
 
-      // determine phase name
-      let phase = "";
-      if (loadFactor && phaseByLoad.has(String(loadFactor)))
+      // Enhanced state extraction with fallback handling
+      let serviceState =
+        entry.serviceState ??
+        entry.response?.serviceResponse?.serviceState ??
+        entry.response?.serviceState ??
+        "";
+
+      // If no state and used fallback, try to infer from context
+      if (!serviceState && usedFallback === "YES") {
+        serviceState = "FALLBACK_ACTIVE";
+      }
+
+      // Enhanced test phase detection
+      let phase = entry.testPhase ?? "";
+      if (!phase && entry.relativeTimeSeconds) {
+        const relTime = parseFloat(entry.relativeTimeSeconds);
+        const totalDuration = rel && firstTs ? rel * 5 : 3600; // estimate if unknown
+        if (relTime < totalDuration * 0.2) {
+          phase = "initial";
+        } else if (relTime < totalDuration * 0.5) {
+          phase = "ramp-up";
+        } else if (relTime < totalDuration * 0.8) {
+          phase = "steady-state";
+        } else {
+          phase = "wind-down";
+        }
+      }
+
+      // If still no phase, try to determine from demoResponse phases
+      if (!phase && loadFactor && phaseByLoad.has(String(loadFactor))) {
         phase = phaseByLoad.get(String(loadFactor));
-      else if (entry.serviceState && phaseByState.has(entry.serviceState))
-        phase = phaseByState.get(entry.serviceState);
+      } else if (!phase && serviceState && phaseByState.has(serviceState)) {
+        phase = phaseByState.get(serviceState);
+      }
+
+      // Default phase if nothing else works
+      if (!phase) {
+        phase = "workload";
+      }
 
       rt.addRow({
         t: rel,
         id: entry.id ?? "",
-        state:
-          entry.serviceState ??
-          entry.response?.serviceResponse?.serviceState ??
-          "",
+        state: serviceState,
         rt: entry.durationMs ?? entry.duration ?? "",
         result: result,
         fallback: usedFallback,
@@ -269,8 +335,9 @@ async function generateExcelReportForRun(runPath) {
   // Sheet: Adaptation timeline (parse compose logs / tuner logs)
   const adaptationEvents = parseAdaptationEventsFromLogs(
     composeLogs,
-    runStartTs,
+    runStartTs
   );
+
   if (adaptationEvents && adaptationEvents.length > 0) {
     const at = workbook.addWorksheet("Adaptation_Timeline");
     at.columns = [
@@ -290,35 +357,45 @@ async function generateExcelReportForRun(runPath) {
       runStartTs ||
       (adaptationEvents[0] && adaptationEvents[0].timestamp) ||
       Date.now();
+
     for (const e of adaptationEvents) {
-      const rel = e.timestamp
-        ? ((e.timestamp - startTs) / 1000).toFixed(3)
-        : "";
-      // map fields from parsed kvs
+      const rel =
+        e.timestamp && startTs
+          ? ((e.timestamp - startTs) / 1000).toFixed(3)
+          : "0.000";
+
+      // Extract values with better mapping
       const failureRate =
         e.failurerate ??
-        e["failure_rate"] ??
-        e.failureRate ??
-        e["failure"] ??
+        e.failure_rate ??
+        e.failure ??
+        e.effective_failure_rate ??
         "";
-      const threshold = e.threshold ?? e["threshold"] ?? "";
-      let cooldown = e.cooldown ?? "";
-      // cooldown may be like "15000→18000ms" or "15000ms" convert to seconds
+      const threshold = e.threshold ?? e.failure_threshold ?? "";
+      const cooldown = e.cooldown ?? e.cooldown_ms ?? "";
+      const retries = e.retries ?? e.max_retries ?? e.maxretries ?? "";
+      const reason = e.reason ?? e.scenario ?? e.message ?? "";
+      const state = e.state ?? e.system_state ?? e.systemstate ?? "";
+
+      // Convert cooldown to seconds if it's in milliseconds
       let cooldown_s = "";
       if (cooldown) {
-        const n = cooldown.match(/(\d+(?:\.\d+)?)/g);
-        if (n && n[0]) cooldown_s = (Number(n[0]) / 1000).toString();
+        const numCooldown = parseFloat(cooldown);
+        if (!isNaN(numCooldown)) {
+          // If cooldown is > 1000, assume it's milliseconds
+          cooldown_s =
+            numCooldown > 1000 ? (numCooldown / 1000).toString() : cooldown;
+        } else {
+          cooldown_s = cooldown;
+        }
       }
-      const retries = e.retries ?? e["retries"] ?? e.maxretries ?? "";
-      const reason = e.reason ?? e.message ?? "";
-      const state = e.state ?? e.systemstate ?? "";
 
       at.addRow({
         t: rel,
         event: e.event || "ADAPTATION",
         failure_threshold: threshold,
         cooldown_s: cooldown_s,
-        cooldown_m: cooldown_s ? String(Number(cooldown_s) / 60) : "",
+        cooldown_m: cooldown_s ? (parseFloat(cooldown_s) / 60).toFixed(2) : "",
         retries: retries,
         reason: reason,
         state: state,
@@ -336,7 +413,7 @@ async function generateExcelReportForRun(runPath) {
     if (serviceBstat.serviceMetrics) {
       sb.addRow(["Metric", "Value"]);
       Object.entries(serviceBstat.serviceMetrics).forEach(([k, v]) =>
-        sb.addRow([k, v]),
+        sb.addRow([k, v])
       );
     }
 
@@ -370,7 +447,7 @@ async function generateExcelReportForRun(runPath) {
   // Save workbook
   const outName = path.join(
     runPath,
-    `report_${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`,
+    `report_${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`
   );
   await workbook.xlsx.writeFile(outName);
   return outName;
@@ -385,7 +462,7 @@ async function generateExcelReportForRun(runPath) {
       const latest = findLatestRun(resultsRoot);
       if (!latest) {
         console.error(
-          "No run folders found under experiments/results. Please provide a run path.",
+          "No run folders found under experiments/results. Please provide a run path."
         );
         process.exit(1);
       }
@@ -398,7 +475,7 @@ async function generateExcelReportForRun(runPath) {
   } catch (e) {
     console.error(
       "Failed to generate report:",
-      e instanceof Error ? e.message : String(e),
+      e instanceof Error ? e.message : String(e)
     );
     process.exit(1);
   }
