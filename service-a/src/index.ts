@@ -11,13 +11,6 @@ import {
 // New: Prometheus client for metrics endpoint
 import client from "prom-client";
 
-// Note: Tuner is now started in the adaptive-middleware service
-// startAdaptiveTuner(); // Removed - runs in adaptive-middleware service
-
-// Start the adaptive tuner
-console.log("Starting Adaptive Tuner in Service A...");
-startAdaptiveTuner();
-
 const app = express();
 app.use(express.json());
 
@@ -130,8 +123,13 @@ function addPresentationLog(category: string, message: string, data?: any) {
   );
 }
 
+// Set up log callbacks BEFORE starting the tuner
 setMiddlewareLogCallback(addPresentationLog);
 setLogCallback(addPresentationLog);
+
+// Start the adaptive tuner NOW (after callbacks are set)
+console.log("Starting Adaptive Tuner in Service A...");
+startAdaptiveTuner();
 
 // 🎓 ACADEMIC MARKOV CHAIN DEMONSTRATION
 app.get("/demo/markov-academic", async (req, res) => {

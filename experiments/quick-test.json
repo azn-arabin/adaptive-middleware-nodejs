@@ -1,0 +1,15 @@
+{
+  "serviceAUrl": "http://localhost:3000",
+  "serviceBUrl": "http://localhost:5000",
+  "seeds": [42],
+  "loadFactors": [1.0],
+  "minTransitionMs": 2000,
+  "maxTransitionMs": 8000,
+  "runsPerCombination": 1,
+  "demoEndpoint": "/demo/markov-enhanced",
+  "waitForServicesTimeoutSec": 120,
+  "runDurationSec": 60,
+  "requestIntervalMs": 1000,
+  "workloadEndpoint": "/test",
+  "generateExcelReport": true
+}

@@ -14,7 +14,13 @@ const fs = require("fs");
 const path = require("path");
 
 const scenarios = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "scenarios.json"), "utf8")
+  fs.readFileSync(
+    path.join(
+      __dirname,
+      process.argv.includes("--quick") ? "quick-test.json" : "scenarios.json"
+    ),
+    "utf8"
+  )
 );
 // Allow quick CLI overrides for smoke testing without editing scenarios.json
 // Usage: node experiments/runner.js --smoke  (runs 120s)
@@ -427,19 +433,12 @@ async function runWorkload(
         // Archive docker-compose logs (optimized for large outputs)
         try {
           console.log("Capturing docker-compose logs...");
-          // Use --tail to limit log size for long runs and increase buffer
-          const maxLogLines = Math.min(
-            5000,
-            Math.floor(scenarios.runDurationSec / 3)
-          );
-          const allLogs = execSync(
-            `docker-compose logs --no-color --tail=${maxLogLines}`,
-            {
-              encoding: "utf8",
-              maxBuffer: 1024 * 1024 * 50, // 50MB buffer
-              timeout: 60000, // 60 second timeout
-            }
-          );
+          // Capture ALL logs - don't use --tail to avoid missing adaptation events
+          const allLogs = execSync(`docker-compose logs --no-color`, {
+            encoding: "utf8",
+            maxBuffer: 1024 * 1024 * 100, // 100MB buffer for large logs
+            timeout: 60000, // 60 second timeout
+          });
           fs.writeFileSync(
             path.join(runPath, "compose-logs.txt"),
             allLogs,
@@ -451,11 +450,11 @@ async function runWorkload(
           // Try individual service logs as fallback with smaller buffers
           try {
             const serviceALogs = execSync(
-              "docker-compose logs service-a --no-color --tail=1000",
+              "docker-compose logs service-a --no-color",
               {
                 encoding: "utf8",
-                maxBuffer: 1024 * 1024 * 10,
-                timeout: 20000,
+                maxBuffer: 1024 * 1024 * 20,
+                timeout: 30000,
               }
             );
             fs.writeFileSync(
@@ -469,11 +468,11 @@ async function runWorkload(
           }
           try {
             const serviceBLogs = execSync(
-              "docker-compose logs service-b --no-color --tail=1000",
+              "docker-compose logs service-b --no-color",
               {
                 encoding: "utf8",
-                maxBuffer: 1024 * 1024 * 10,
-                timeout: 20000,
+                maxBuffer: 1024 * 1024 * 20,
+                timeout: 30000,
               }
             );
             fs.writeFileSync(
@@ -487,11 +486,11 @@ async function runWorkload(
           }
           try {
             const middlewareLogs = execSync(
-              "docker-compose logs adaptive-middleware --no-color --tail=1000",
+              "docker-compose logs adaptive-middleware --no-color",
               {
                 encoding: "utf8",
-                maxBuffer: 1024 * 1024 * 10,
-                timeout: 20000,
+                maxBuffer: 1024 * 1024 * 20,
+                timeout: 30000,
               }
             );
             fs.writeFileSync(
