@@ -31,80 +31,174 @@ function parseAdaptationEventsFromLogs(logText, runStartTs) {
   const lines = logText.split(/\r?\n/);
   const events = [];
 
-  // Updated regex patterns to match actual log formats
-  const tunerRegex = /\[TUNER\].*ADAPTED?\s*\|\s*(.*)/i;
-  const forcedRegex = /\[TUNER\].*FORCED ADAPTATION\s*\|\s*(.*)/i;
+  // Find run start timestamp from the earliest tuner log
+  let actualRunStartTs = null;
+
+  // First pass: find the actual start time
+  for (const l of lines) {
+    const timeMatch = l.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)/);
+    if (timeMatch && l.includes("[TUNER]")) {
+      const ts = Date.parse(timeMatch[1]);
+      if (!actualRunStartTs || ts < actualRunStartTs) {
+        actualRunStartTs = ts;
+      }
+    }
+  }
+
+  // Use the found start time or fallback
+  const startTs = actualRunStartTs || runStartTs || Date.now();
+
+  // Regex patterns to match adaptation events
+  const tunerRegex =
+    /\[TUNER\].*(?:ADAPTED?|FORCED ADAPTATION|STABLE)\s*\|\s*(.*)/i;
   const adaptationRegex = /🎯 \[ADAPTATION\]/i;
 
   for (const l of lines) {
     let match = null;
     let payload = null;
+    let eventType = "ADAPTATION";
 
-    // Try different regex patterns
+    // Check for TUNER events (ADAPTED, FORCED ADAPTATION, STABLE)
     if (tunerRegex.test(l)) {
       match = l.match(tunerRegex);
-      if (match && match[1]) payload = match[1].trim();
-    } else if (forcedRegex.test(l)) {
-      match = l.match(forcedRegex);
-      if (match && match[1]) payload = match[1].trim();
+      if (match && match[1]) {
+        payload = match[1].trim();
+        if (l.includes("STABLE")) eventType = "STABLE";
+        else if (l.includes("FORCED")) eventType = "FORCED";
+        else eventType = "ADAPTED";
+      }
     } else if (adaptationRegex.test(l)) {
-      // Look for the next line or extract from current line
+      // Handle 🎯 [ADAPTATION] events
       const adaptMatch = l.match(/🎯 \[ADAPTATION\]\s*(.*)/i);
-      if (adaptMatch && adaptMatch[1]) payload = adaptMatch[1].trim();
+      if (adaptMatch && adaptMatch[1]) {
+        payload = adaptMatch[1].trim();
+        eventType = "ADAPTATION";
+      }
     }
 
     if (!payload) continue;
 
-    // Try to extract timestamp from the line
+    // Extract timestamp from the line
     const timeMatch = l.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)/);
     let ts = null;
     if (timeMatch) {
       ts = Date.parse(timeMatch[1]);
-    } else {
-      // Look for epoch timestamp in the line
-      const epochMatch = l.match(/(17\d{11,13})/);
-      if (epochMatch) ts = Number(epochMatch[1]);
     }
+
+    // Calculate relative time in seconds from start (always positive)
+    const relativeTime = ts && startTs ? Math.max(0, (ts - startTs) / 1000) : 0;
 
     const evt = {
       rawLine: l,
-      timestamp: ts || runStartTs || null,
-      event: "ADAPTATION",
+      timestamp: ts || startTs,
+      relativeTime: relativeTime,
+      event: eventType,
     };
 
     if (payload) {
       // Parse key-value pairs from payload
       const parts = payload.split("|").map((p) => p.trim());
       for (const p of parts) {
-        const kv = p.split(":");
-        if (kv.length < 2) continue;
-        const key = kv[0].trim();
-        const val = kv.slice(1).join(":").trim();
+        const colonIndex = p.indexOf(":");
+        if (colonIndex === -1) continue;
 
-        // Normalize keys and extract final values (after → if present)
+        const key = p.substring(0, colonIndex).trim();
+        const val = p.substring(colonIndex + 1).trim();
+
+        // Normalize keys
         const k = key
           .toLowerCase()
           .replace(/\s+/g, "_")
           .replace(/[^a-z0-9_]/g, "");
+
+        // Extract single final values (not ranges)
         let finalVal = val;
 
-        // Extract the final value from ranges like "0.5→0.5" or "10000→10000ms"
-        if (val.includes("→")) {
-          const parts = val.split("→");
-          finalVal = parts[parts.length - 1].trim();
-          // Remove units like "ms" from the end
-          finalVal = finalVal.replace(/ms$/, "").replace(/s$/, "");
+        // Handle threshold values - extract final value only
+        if (k === "threshold") {
+          if (val.includes("→")) {
+            const parts = val.split("→");
+            finalVal = parts[parts.length - 1].trim();
+          }
+          evt.failure_threshold = finalVal;
         }
+        // Handle cooldown values - extract final value and convert to seconds
+        else if (k === "cooldown") {
+          if (val.includes("→")) {
+            const parts = val.split("→");
+            finalVal = parts[parts.length - 1].trim();
+          }
+          finalVal = finalVal.replace(/ms$/, "");
+          const cooldownMs = parseFloat(finalVal);
+          if (!isNaN(cooldownMs)) {
+            evt.cooldown_s =
+              cooldownMs >= 1000 ? (cooldownMs / 1000).toString() : finalVal;
+            evt.cooldown_m = (parseFloat(evt.cooldown_s) / 60).toFixed(2);
+          } else {
+            evt.cooldown_s = finalVal;
+          }
+        }
+        // Handle retries values - extract final value only
+        else if (k === "retries") {
+          if (val.includes("→")) {
+            const parts = val.split("→");
+            finalVal = parts[parts.length - 1].trim();
+          }
+          evt.retries = finalVal;
+        }
+        // Handle failure rate
+        else if (k === "failurerate") {
+          evt.failure_rate = val;
+        }
+        // Handle scenario/reason
+        else if (k === "scenario") {
+          evt.reason = val;
+        }
+        // Store other fields as-is
+        else {
+          evt[k] = val;
+        }
+      }
+    }
 
-        evt[k] = finalVal;
+    // Extract system state from context lines around this adaptation event
+    if (logText) {
+      const logLines = logText.split(/\r?\n/);
+      const currentLineIndex = logLines.findIndex((line) => line === l);
+
+      // Look for Markov state transitions near this adaptation event
+      const searchRange = 20; // Look 20 lines before and after
+      const startSearch = Math.max(0, currentLineIndex - searchRange);
+      const endSearch = Math.min(
+        logLines.length - 1,
+        currentLineIndex + searchRange
+      );
+
+      for (let i = startSearch; i <= endSearch; i++) {
+        const contextLine = logLines[i];
+        // Enhanced patterns for state extraction
+        const stateMatch =
+          contextLine.match(/State transition.*→\s*(\w+)/i) ||
+          contextLine.match(/State transition.*->\s*(\w+)/i) ||
+          contextLine.match(/transition.*to[:\s]+(\w+)/i) ||
+          contextLine.match(/Forced transition to:\s*(\w+)/i) ||
+          contextLine.match(/State:\s*(\w+)/i) ||
+          contextLine.match(/serviceState.*:\s*"?(\w+)"?/i) ||
+          contextLine.match(/"to":\s*"(\w+)"/i) ||
+          contextLine.match(/state:\s*(\w+)/i);
+
+        if (stateMatch && stateMatch[1]) {
+          evt.system_state = stateMatch[1].toUpperCase();
+          break;
+        }
       }
     }
 
     events.push(evt);
   }
 
-  // Sort by timestamp
-  events.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  // Sort events by relative time
+  events.sort((a, b) => a.relativeTime - b.relativeTime);
   return events;
 }
 
@@ -146,10 +240,26 @@ async function generateExcelReportForRun(runPath) {
 
   // determine run start timestamp for relative times
   let runStartTs = null;
-  if (Array.isArray(requestTimeline) && requestTimeline.length > 0) {
-    runStartTs = requestTimeline[0].timestamp;
-  } else if (demoResponse && demoResponse.executionTime) {
-    runStartTs = Date.parse(demoResponse.executionTime);
+
+  // First, try to get the earliest adaptation event timestamp as the real start
+  if (composeLogs) {
+    const allAdaptationEvents = parseAdaptationEventsFromLogs(
+      composeLogs,
+      null
+    );
+    if (allAdaptationEvents.length > 0) {
+      // Use the earliest adaptation event as the start time
+      runStartTs = allAdaptationEvents[0].timestamp;
+    }
+  }
+
+  // Fallback to other timestamps if no adaptation events found
+  if (!runStartTs) {
+    if (Array.isArray(requestTimeline) && requestTimeline.length > 0) {
+      runStartTs = requestTimeline[0].timestamp;
+    } else if (demoResponse && demoResponse.executionTime) {
+      runStartTs = Date.parse(demoResponse.executionTime);
+    }
   }
 
   // Sheet: Summary
@@ -359,43 +469,24 @@ async function generateExcelReportForRun(runPath) {
       Date.now();
 
     for (const e of adaptationEvents) {
-      const rel =
-        e.timestamp && startTs
-          ? ((e.timestamp - startTs) / 1000).toFixed(3)
-          : "0.000";
+      // Use the pre-calculated relative time from parsing (always starts at 0)
+      const rel = e.relativeTime ? e.relativeTime.toFixed(3) : "0.000";
 
-      // Extract values with better mapping
-      const failureRate =
-        e.failurerate ??
-        e.failure_rate ??
-        e.failure ??
-        e.effective_failure_rate ??
-        "";
-      const threshold = e.threshold ?? e.failure_threshold ?? "";
-      const cooldown = e.cooldown ?? e.cooldown_ms ?? "";
-      const retries = e.retries ?? e.max_retries ?? e.maxretries ?? "";
-      const reason = e.reason ?? e.scenario ?? e.message ?? "";
-      const state = e.state ?? e.system_state ?? e.systemstate ?? "";
-
-      // Convert cooldown to seconds if it's in milliseconds
-      let cooldown_s = "";
-      if (cooldown) {
-        const numCooldown = parseFloat(cooldown);
-        if (!isNaN(numCooldown)) {
-          // If cooldown is > 1000, assume it's milliseconds
-          cooldown_s =
-            numCooldown > 1000 ? (numCooldown / 1000).toString() : cooldown;
-        } else {
-          cooldown_s = cooldown;
-        }
-      }
+      // Extract values using the cleaned parsing fields
+      const failureRate = e.failure_rate ?? "";
+      const threshold = e.failure_threshold ?? "";
+      const cooldown_s = e.cooldown_s ?? "";
+      const cooldown_m = e.cooldown_m ?? "";
+      const retries = e.retries ?? "";
+      const reason = e.reason ?? "";
+      const state = e.system_state ?? "";
 
       at.addRow({
         t: rel,
         event: e.event || "ADAPTATION",
         failure_threshold: threshold,
         cooldown_s: cooldown_s,
-        cooldown_m: cooldown_s ? (parseFloat(cooldown_s) / 60).toFixed(2) : "",
+        cooldown_m: cooldown_m,
         retries: retries,
         reason: reason,
         state: state,

@@ -18,6 +18,10 @@ yarn-error.log*
 .vscode/
 .idea/
 
+*.xlxs
+*.xls
+*.csv
+
 # OS files
 .DS_Store
 Thumbs.db

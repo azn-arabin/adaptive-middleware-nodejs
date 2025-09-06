@@ -8,7 +8,7 @@
   "runsPerCombination": 1,
   "demoEndpoint": "/demo/markov-enhanced",
   "waitForServicesTimeoutSec": 120,
-  "runDurationSec": 21600,
+  "runDurationSec": 9000,
   "requestIntervalMs": 1000,
   "workloadEndpoint": "/test",
   "generateExcelReport": true
