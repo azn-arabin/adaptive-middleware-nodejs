@@ -1,6 +1,5 @@
 # Adaptive Fault Tolerant Middleware with Markov Chain Failure Model
 
-
 A sophisticated fault-tolerant middleware system implementing adaptive resilience patterns with a Markov Chain-based failure model for realistic testing scenarios.
 
 ## 📋 Table of Contents
@@ -23,6 +22,7 @@ A sophisticated fault-tolerant middleware system implementing adaptive resilienc
 This project demonstrates an **adaptive middleware system** that automatically adjusts its fault-tolerance parameters based on real-time service behavior. Instead of using random failures, it employs a **5-state Markov Chain model** to simulate realistic service degradation patterns.
 
 ### Key Innovation
+
 - **Markov Chain Failure Model**: Replaces naive random failures with academically rigorous, state-based failure patterns
 - **Adaptive Configuration**: Dynamically adjusts retry counts, circuit breaker thresholds, and cooldown periods
 - **Load Factor Integration**: Correlates system load with failure probabilities
@@ -45,18 +45,21 @@ This project demonstrates an **adaptive middleware system** that automatically a
 ## ✨ Features
 
 ### Adaptive Middleware Components
+
 - **🔄 Retry Mechanism**: Configurable retry logic with exponential backoff
 - **⚡ Circuit Breaker**: Prevents cascading failures with adaptive thresholds
 - **🛡️ Fallback Strategy**: Graceful degradation with contextual responses
 - **🎯 Adaptive Tuner**: Real-time parameter adjustment based on failure rates
 
 ### Markov Chain Failure Model
+
 - **🎭 5-State System**: HEALTHY → DEGRADED → FAILING → CRITICAL → RECOVERING
 - **📊 Load Factor Integration**: System load influences transition probabilities
 - **🔬 Statistical Analysis**: MTBF, MTTR, state distribution calculations
 - **📈 Academic Metrics**: Transition matrices and reliability engineering data
 
 ### Monitoring & Analytics
+
 - **📋 Real-time Logs**: Comprehensive logging with categorization
 - **📊 Performance Metrics**: Response times, success rates, fallback usage
 - **🎓 Academic Dashboard**: State transitions, adaptation timeline
@@ -66,13 +69,13 @@ This project demonstrates an **adaptive middleware system** that automatically a
 
 ### State Definitions
 
-| State | Symbol | Failure Rate | Response Delay | Description |
-|-------|--------|-------------|---------------|-------------|
-| 🟢 HEALTHY | H | 5% | 50ms | Normal operation, minimal failures |
-| 🟡 DEGRADED | D | 25% | 200ms | Performance degradation, moderate failures |
-| 🟠 FAILING | F | 60% | 800ms | System stress, majority failures |
-| 🔴 CRITICAL | C | 90% | 2000ms | Near-complete failure, emergency state |
-| 🔄 RECOVERING | R | 35% | 400ms | Self-healing process, improving condition |
+| State         | Symbol | Failure Rate | Response Delay | Description                                |
+| ------------- | ------ | ------------ | -------------- | ------------------------------------------ |
+| 🟢 HEALTHY    | H      | 5%           | 50ms           | Normal operation, minimal failures         |
+| 🟡 DEGRADED   | D      | 25%          | 200ms          | Performance degradation, moderate failures |
+| 🟠 FAILING    | F      | 60%          | 800ms          | System stress, majority failures           |
+| 🔴 CRITICAL   | C      | 90%          | 2000ms         | Near-complete failure, emergency state     |
+| 🔄 RECOVERING | R      | 35%          | 400ms          | Self-healing process, improving condition  |
 
 ### Transition Probability Matrix
 
@@ -95,6 +98,7 @@ Where P_XY represents the probability of transitioning from state X to state Y.
 ## 🚀 Installation & Setup
 
 ### Prerequisites
+
 - **Node.js** (v18 or higher)
 - **Docker** and **Docker Compose**
 - **TypeScript** knowledge for development
@@ -102,17 +106,20 @@ Where P_XY represents the probability of transitioning from state X to state Y.
 ### Quick Start
 
 1. **Clone the repository**
+
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/azn-arabin/adaptive-middleware-nodejs.git
    cd adaptive-middleware-project
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Start the services**
+
    ```bash
    docker-compose up --build
    ```
@@ -137,11 +144,13 @@ docker-compose logs -f service-b
 ### Basic Demonstration
 
 1. **Access the demo interface**
+
    ```
    GET http://localhost:3000/demo
    ```
 
 2. **Run academic demonstration**
+
    ```
    GET http://localhost:3000/demo/academic
    ```
@@ -170,35 +179,37 @@ curl -X POST http://localhost:5000/markov/force-state \
 
 ### Service A (Port 3000)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/call-service-b` | GET | Test middleware with Service B call |
-| `/demo` | GET | Interactive demonstration interface |
-| `/demo/academic` | GET | Academic demonstration with all states |
-| `/metrics` | GET | Real-time metrics and logs |
-| `/adaptive/force` | POST | Force adaptive configuration changes |
-| `/adaptive/reset` | POST | Reset adaptive parameters |
+| Endpoint          | Method | Description                            |
+| ----------------- | ------ | -------------------------------------- |
+| `/call-service-b` | GET    | Test middleware with Service B call    |
+| `/demo`           | GET    | Interactive demonstration interface    |
+| `/demo/academic`  | GET    | Academic demonstration with all states |
+| `/metrics`        | GET    | Real-time metrics and logs             |
+| `/adaptive/force` | POST   | Force adaptive configuration changes   |
+| `/adaptive/reset` | POST   | Reset adaptive parameters              |
 
 ### Service B (Port 5000)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/data` | GET | Main data endpoint (subject to Markov failures) |
-| `/health` | GET | Service health check |
-| `/markov/stats` | GET | Markov chain statistics |
-| `/markov/force-state` | POST | Force specific state (testing) |
-| `/markov/set-load` | POST | Set load factor |
-| `/markov/natural` | GET | Switch to natural state transitions |
+| Endpoint              | Method | Description                                     |
+| --------------------- | ------ | ----------------------------------------------- |
+| `/data`               | GET    | Main data endpoint (subject to Markov failures) |
+| `/health`             | GET    | Service health check                            |
+| `/markov/stats`       | GET    | Markov chain statistics                         |
+| `/markov/force-state` | POST   | Force specific state (testing)                  |
+| `/markov/set-load`    | POST   | Set load factor                                 |
+| `/markov/natural`     | GET    | Switch to natural state transitions             |
 
 ## 🎓 Academic Analysis
 
 ### Research Questions Addressed
 
 1. **How do adaptive systems respond to realistic failure patterns?**
+
    - Measured through MTBF/MTTR analysis
    - State transition frequency correlation with adaptation speed
 
 2. **What is the effectiveness of different resilience patterns?**
+
    - Retry vs Circuit Breaker vs Fallback success rates
    - Adaptive parameter optimization performance
 
@@ -238,10 +249,12 @@ curl -X POST http://localhost:5000/markov/force-state \
 The system generates presentation-ready tables for academic analysis:
 
 1. **Request Timeline Table**
+
    - Timestamp, State, Duration, Success, Load Factor
    - Suitable for time-series analysis and state transition graphs
 
 2. **Adaptation Timeline Table**
+
    - Timestamp, Threshold Changes, Cooldown Adjustments, Retry Updates
    - Shows middleware evolution over time
 
@@ -249,10 +262,53 @@ The system generates presentation-ready tables for academic analysis:
    - State frequencies, average durations, success rates per state
    - Perfect for pie charts and bar graphs
 
-Generate Excel reports:
+## 🧪 Experiments & Automated Evaluation
+
+### Running Experiments
+
+The `experiments/` folder contains scripts and configuration files for automated, reproducible experiments:
+
+- **`runner.js`**: Main experiment orchestrator. It launches the full system, runs workloads, collects metrics, and saves all results in timestamped folders under `experiments/results/`.
+
+  - **Usage:**
+    ```bash
+    node experiments/runner.js
+    ```
+    - Use `--durationSec=SECONDS` to set custom experiment length.
+    - Use `--quick` for a short smoke test.
+    - All logs, metrics, and request/adaptation timelines are saved automatically.
+
+- **`scenarios.json`** and **`quick-test.json`**: Define experiment parameters (seeds, load factors, run durations, endpoints, etc).
+
+- **`results/`**: Stores all experiment outputs, including logs, metrics, and JSON timelines for each run.
+
+### Generating Excel Reports
+
+After running an experiment, you can generate a comprehensive Excel report from the results:
+
 ```bash
-node generate-excel-report.js
+node generate-excel-report.js [path/to/experiments/results/<run-folder>]
 ```
+
+- If no path is provided, the script will use the latest run automatically.
+- The Excel file includes:
+  - Request timeline (all requests, states, durations, fallback usage)
+  - Adaptation timeline (all parameter changes)
+  - Summary statistics and Markov state distributions
+  - Raw Prometheus metrics for both services
+
+### Example Workflow
+
+1. **Run an experiment:**
+   ```bash
+   node experiments/runner.js --durationSec=600
+   ```
+2. **Generate Excel report:**
+   ```bash
+   node generate-excel-report.js
+   ```
+3. **Find results and reports in:**  
+   `experiments/results/<timestamp>_<runId>/`
 
 ## 🔧 Technical Implementation
 
@@ -274,6 +330,11 @@ adaptive-middleware-project/
 │   └── src/
 │       ├── index.ts             # Express server
 │       └── markovFailureModel.ts # Markov Chain implementation
+├── experiments/                 # Automated experiment scripts & results
+│   ├── runner.js                # Main experiment runner
+│   ├── scenarios.json           # Experiment scenario definitions
+│   ├── quick-test.json          # Quick test scenario
+│   └── results/                 # All experiment outputs (logs, metrics, timelines)
 ├── docker-compose.yml           # Container orchestration
 └── README.md                    # This file
 ```
@@ -292,9 +353,9 @@ The middleware adapts these parameters dynamically:
 
 ```typescript
 interface AdaptiveConfig {
-  threshold: number;    // Circuit breaker failure threshold (0-1)
-  cooldown: number;     // Circuit breaker cooldown period (ms)
-  retries: number;      // Maximum retry attempts (0-5)
+  threshold: number; // Circuit breaker failure threshold (0-1)
+  cooldown: number; // Circuit breaker cooldown period (ms)
+  retries: number; // Maximum retry attempts (0-5)
 }
 ```
 
