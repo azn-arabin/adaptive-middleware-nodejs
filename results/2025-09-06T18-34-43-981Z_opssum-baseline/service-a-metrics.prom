@@ -1,0 +1,6 @@
+# HELP demo_requests_total total synthetic requests
+# TYPE demo_requests_total counter
+demo_requests_total 9000
+# HELP demo_success_total successful requests
+# TYPE demo_success_total counter
+demo_success_total 5830

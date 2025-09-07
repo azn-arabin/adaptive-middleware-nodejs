@@ -1,0 +1,3 @@
+# HELP service_b_avg_response_ms synthetic avg response
+# TYPE service_b_avg_response_ms gauge
+service_b_avg_response_ms 509

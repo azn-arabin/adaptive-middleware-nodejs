@@ -1,0 +1,23 @@
+{
+  "status": "SUCCESS",
+  "message": "Synthetic opssum baseline presentation",
+  "results": {
+    "phases": [
+      {
+        "stateName": "HEALTHY",
+        "requestCount": 7200,
+        "loadFactor": 1
+      },
+      {
+        "stateName": "FAILING",
+        "requestCount": 1800,
+        "loadFactor": 1
+      }
+    ],
+    "middlewarePerformance": {
+      "totalRequests": 9000,
+      "successRate": "64.78%",
+      "fallbackRequests": 1538
+    }
+  }
+}
